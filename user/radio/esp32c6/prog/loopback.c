@@ -18,6 +18,8 @@
  * The tone lasts as long as its capture, tens of microseconds at 80 MHz, a second apart, at the calibration's level,
  * the capture told only once the tone and the loopback are off;
  * the loopback does not keep it off the air, which hears it about 22 dB below the radio's 0 dBm, see hw/phy.md, "The loopback".
+ * muxes=1 clears MODEM_SYSCON's CLK_DATA_DUMP_MUX in the odd seconds, the dump block's clock 32 MHz instead of 80,
+ * and moves dumprate= on by one every two seconds, round its four, so that one run takes every clock and divider.
  * It sends no frame.
  *
  * Run it with make BOARD=esp32c6 radio PROG=loopback RADIO_CONFIG=file, see build.mk,
@@ -26,6 +28,7 @@
 
 #include <stdint.h>
 
+#include "devices.h"
 #include "drv.h"
 #include "dump.h"
 #include "mac.h"
@@ -42,6 +45,9 @@ DRV_PROGRAM("the loopback", DRV_NEED_DUMP);
 #define HALF_MAX_MS  500u
 #define ATTEN_LEAST  0x30u /* the calibration's own, the loudest this program sends */
 #define ATTEN_MOST   0xffu
+#define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
+#define CLK_CONF     (MODEM_SYSCON_BASE + 0x4u)
+#define CLK_DUMP_MUX (1u << 21) /* MODEM_SYSCON_CLK_DATA_DUMP_MUX, 1 after the start, see hw/dump.md "A player" */
 
 static int up, looped, toned, held;
 
@@ -108,6 +114,7 @@ void drv_run(struct drv *d, struct self *own)
     uint32_t hold = config_number(d->conf, d->conf_len, "hold", 0);
     uint32_t rhythm = config_number(d->conf, d->conf_len, "rhythm", 0);
     uint32_t half = config_number(d->conf, d->conf_len, "half", 50);
+    uint32_t muxes = config_number(d->conf, d->conf_len, "muxes", 0);
     drv_must("a channel of 1 to 13", channel >= 1 && channel <= 13 ? ESP_OK : ESP_FAIL);
     drv_must("no dumpbt=, the BLE side being i154listen's", conf.bt == 0 ? ESP_OK : ESP_FAIL);
     drv_must("an atten of ATTEN_LEAST, the calibration's, to ATTEN_MOST", atten >= ATTEN_LEAST && atten <= ATTEN_MOST ? ESP_OK : ESP_FAIL);
@@ -137,7 +144,13 @@ void drv_run(struct drv *d, struct self *own)
         uint64_t now = osi_now_us();
         if (now - told >= 1000000u) {
             told = now;
-            uint32_t s = (step + second * stepstep) & 0x3ffu;
+            uint32_t s = (step + second * stepstep) & 0x3ffu, clk = REG(CLK_CONF);
+            if (muxes) {
+                conf.rate = (second / 2u) % 4u;
+                REG(CLK_CONF) = second % 2u ? clk & ~CLK_DUMP_MUX : clk | CLK_DUMP_MUX;
+                drv_say("loopback: second %u: the dump clock's mux %u, dumprate %u\n", second,
+                        (REG(CLK_CONF) & CLK_DUMP_MUX) != 0, conf.rate);
+            }
             drv_say("loopback: second %u: alone\n", second);
             dump_take(&conf);
             drv_phy_loopback(1, lb);
@@ -152,6 +165,7 @@ void drv_run(struct drv *d, struct self *own)
             toned = 0;
             drv_phy_loopback(0, 0);
             looped = 0;
+            REG(CLK_CONF) = clk;
             drv_say("loopback: second %u: looped, tone step %u atten %u\n", second, s, atten);
             dump_tell(&conf);
             second++;

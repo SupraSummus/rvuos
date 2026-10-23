@@ -27,7 +27,7 @@ The words, as `adctrig` writes them and the board answered:
 | Word | Bits | What | Source |
 |---|---|---|---|
 | `0x600A9004` | 0 to 14 | the samples a capture takes | `adctrig` writes its first argument plus one |
-| | 15, 16 | the 80 MHz clock divided by 1, 2, 3 or 5 | ESP-SDR; 3 gave 16 MS/s on the board, measured below |
+| | 15, 16 | the block's clock divided by 1, 2, 3 or 5: of 80 MHz, or 32 with `CLK_DATA_DUMP_MUX` cleared | ESP-SDR; measured below |
 | | 17 | cleared before a capture | `adctrig` |
 | | 18 | set once the samples are written | `adctrig` waits on it; ESP-SDR writes it before a capture, to clear it |
 | | 19 | written 1 and then 0, the capture starts | `adctrig`, for its first mode alone |
@@ -38,6 +38,7 @@ The words, as `adctrig` writes them and the board answered:
 | `0x600A210C` | 7, 8 to 11, 14, 15, 28 to 31 | the BLE side's set-up, and in bit 7 its start; see below | `adctrig`'s eighth mode |
 | `0x600A4E30` | 8, 0 to 7 | set, and a byte, for source 5: a reception's end in that state, see "What stops the engine" | `adctrig`'s seventh mode; a word of the Wi-Fi MAC's |
 | MODEM_SYSCON `CLK_CONF` `0x600A9804` | 31 | `CLK_DATA_DUMP_EN`, the engine's clock | ESP-IDF's `modem_syscon_reg.h`; `libphy.a`'s `phy_get_adc_rand` sets it too |
+| | 21 | `CLK_DATA_DUMP_MUX`, 1 after the start: the block's clock 80 MHz; cleared, 32 MHz | ESP-IDF names it; measured below and in "A player" |
 | HP_SYSTEM `SRAM_USAGE` `0x60095004` | 8 to 11 | a bit a 128 KiB bank of SRAM, set the engine's | ESP-IDF's `hp_system_reg.h`; `adctrig` sets bit 10, the bank at `0x40840000` |
 | | 16 | `MAC_DUMP_ALLOC`, the bank's upper 64 KiB | ESP-IDF's `hp_system_reg.h` |
 
@@ -81,6 +82,16 @@ What the board answered, the driver listening on Wi-Fi's channel 1:
   and in a run of steps of 10 MHz those 10 MHz off stood 6 MHz off on the other side, at the level of those in the middle.
   So below the full clock a capture holds what is a rate away from the middle as if it were there,
   and the scan takes its captures at 80 MS/s.
+- `CLK_DATA_DUMP_MUX` cleared, the same dividers give 32, 16, 10.67 and 6.4 MS/s,
+  the rates ESP-SDR's ESP32-H2 captures at, a chip whose radio has only BLE's and 802.15.4's side
+  (measured, `prog/loopback.c` with `muxes=1`, channel 6, the mux cleared every other second and the divider moved on every two,
+  the transmit tone generator's line at +5.00 MHz in each capture, read as a frequency of the samples).
+  The line stood at 0.0625 of the rate at 80 MHz undivided, 0.15625 at 32, 0.125 at 40, 0.3125 at 16 either way,
+  0.1875 at 26.67, 0.46875 at 10.67, and at -0.21875 of 6.4 MS/s, folded in from 0.78125 at the same level:
+  each 5.00 MHz, 71 to 73 dB over the median, at the same strength within 2 %.
+  So the mux changes the clock alone, not the signal: the same receiver's words, kept as the divider keeps them,
+  with no filter at any rate.
+  The quiet loopback's own line, `phy.md`, "The loopback", stood at 3.0 MHz at every rate, which bears the rates out too.
 
 The BLE side, the driver listening for IEEE 802.15.4 on channel 12, as the root task's sampler of then had it:
 
@@ -186,6 +197,7 @@ Open questions of the sampler, beside `TODO.md`'s:
   the reception's states 0x51 to 0x54; what the ETM's event 63 is.
 - The BLE side's rate: its captures take as long as Wi-Fi's at the full clock, yet hold a band of 5 MHz;
   whether its words are the BLE receiver's own samples held or made again at 80 MHz is not known,
+  nor what it captures with `CLK_DATA_DUMP_MUX` cleared, its clock then 32 MHz as the H2's is,
   nor whether `0x600A210C`'s fields other than bit 7 matter.
 - The line 1 MHz from the middle on the BLE side.
 
@@ -233,9 +245,19 @@ Written with 4096 and bit 31 (measured, `write=1`): `0x0C` sets its bit 18 a whi
 | `0x600A9010` | 28, 29 | the first word played, in pages of 4096 words, 16 KiB: 0 to 3 |
 | | others | kept as written, nothing seen of bits 0 to 27 or 30 |
 | HP_SYSTEM `SRAM_USAGE` `0x60095004` | 16 | `MAC_DUMP_ALLOC`, set, the pages are the bank's upper 64 KiB |
+| MODEM_SYSCON `CLK_CONF` `0x600A9804` | 21 | `CLK_DATA_DUMP_MUX`, 1 after the start; cleared, the block's clock 32 MHz instead of 80 |
 
 - 16383 words take 414 us with bit 15 clear and 209 us with it set, as long as a capture of as many at 80 MHz takes;
   the bank's words are as they were afterwards.
+- With `CLK_DATA_DUMP_MUX` cleared, a field ESP-IDF's `modem_syscon_reg.h` names and says no more of,
+  the same 16383 words took 1028 us with bit 15 clear and 516 us with it set, and a capture of as many 517 us
+  (`prog/player.c` with `muxes=1`, the mux cleared every other second, 414 and 209 us in the seconds between):
+  the block's 80 MHz becomes 32 MHz, and the player plays at 80, 40, 32 or 16 MS/s, the poll's few microseconds aside.
+  The capture's rate bits, 15 and 16 of `0x600A9004`, written while the player plays, change nothing of its 414 us.
+  No other bit slows it, so 16 MS/s is its least (measured, `timebits=1`, 4096 words, 107 to 110 us):
+  none of `CLK_CONF`'s bits 0 to 20, which ESP-IDF leaves unnamed, of the page word's 0 to 27,
+  or of the player's word's 16, 17, 20 to 27 and 30, each set alone, moved the play's time by a twentieth,
+  while the mux cleared in the same run, the control, made it 260 us.
 - What the player sends is read best through the modem's IQ estimate, `dc_iq_est_new` in `phy.c`,
   which the receive DC calibration takes: the receiver's mean I and Q over a count, from no word of the bank's.
   Looped back, the player round and round over 4096 words of one word each, `prog/player.c` with `est=1` (measured):
@@ -282,6 +304,11 @@ of some 89 frames each in the 15 s, 0, 0, 0, 0, 1, 14, 48 and 86 came whole, non
 the frames fall away within some 4 dB below the greatest, as a receiver's do near its least level.
 Runs one setting at a time differ by more than that: 300 alone came through 88 % of the time in one, 1 % in the run above,
 which is why the settings go in turn within one run.
+
+At 16 MS/s, the mux cleared, 8 samples a chip, the frame is 6152 samples, and it comes as often as at 40 MS/s
+(measured, `slows=0,1,1,0,1` with `amps=511,511,0,300,300` in one run, some 168 frames of each played in the 15 s):
+168 and 168 at 511, 12 and 3 at 300, in a second run 16 and 13, and none of the frame of nothing.
+So a ping of 22 bytes, 14344 samples, goes as one play, and a play of the whole bank's 16383 samples lasts a millisecond.
 
 ### Frames longer than a play, and the answer heard
 

@@ -15,6 +15,9 @@
  * grab=, a capture of that many words from source 15 at 80 MHz, starts grabat= polls into the play,
  * and the words of the bank it changed are told, dumphex= of them for user/radio/esp32c6/tools/dump-spectrum.py.
  *
+ * muxes=1 clears MODEM_SYSCON's CLK_DATA_DUMP_MUX every other second, the odd ones, while it plays,
+ * the block's clock 32 MHz instead of 80, see hw/dump.md, "A player".
+ * timebits=1 times a play with each bit that might slow it, see time_bits, in the first second.
  * est=1 instead takes the modem's IQ estimate each second, looped back, with nothing played
  * and then with the player round and round over count= words of each of raws=, from the bank's word at=, 0 before it,
  * for each of w10s=, the block's word 0x10 meanwhile, and with upper=1 SRAM_USAGE's MAC_DUMP_ALLOC set; see estimate.
@@ -44,6 +47,8 @@ DRV_PROGRAM("the player", DRV_NEED_DUMP);
 #define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
 
 #define DUMP_CTRL    (MODEM_BASE + 0x9004u)
+#define CLK_CONF     (MODEM_SYSCON_BASE + 0x4u)
+#define CLK_DUMP_MUX (1u << 21) /* MODEM_SYSCON_CLK_DATA_DUMP_MUX, 1 by default */
 #define CTRL_DONE    (1u << 18)
 #define CTRL_TRIGGER (1u << 19)
 #define CTRL_ENABLE  (1u << 31)
@@ -179,6 +184,43 @@ static uint32_t play(const struct play *p)
     REG(DUMP_CTRL) = 0;
     REG(PLAY) = 0;
     return us;
+}
+
+/*
+ * Each bit that might slow the player, one at a time, a play of count words timed with it set:
+ * CLK_CONF's bits 0 to 20, which ESP-IDF leaves unnamed, the page word's 0 to 27 and the player's word's own unexplained ones;
+ * those whose play took other than the plain one's time told, and the mux cleared, the run's control.
+ */
+static void time_bits(const struct play *p)
+{
+    struct play q = *p;
+    q.grab = 0;
+    uint32_t usage = dump_bank_give(), base = play(&q), clk = REG(CLK_CONF), moved = 0;
+    for (uint32_t b = 0; b < 21u + 28u + 12u; b++) { /* bounded by the bits tried */
+        uint32_t at = b < 21u ? CLK_CONF : b < 49u ? PLAY_PAGE : PLAY;
+        uint32_t bit = b < 21u ? 1u << b : b < 49u ? 1u << (b - 21u) : b < 50u ? 1u << 16 : b < 51u ? 1u << 17
+                     : b < 52u ? 1u << 30 : 1u << (20u + b - 52u);
+        uint32_t us;
+        if (at == PLAY) {
+            q.bits = p->bits | bit;
+            us = play(&q);
+            q.bits = p->bits;
+        } else {
+            uint32_t was = REG(at);
+            REG(at) = was | bit;
+            us = play(&q);
+            REG(at) = was;
+        }
+        if (us == NO_WORD || us + us / 20u < base || us > base + base / 20u) {
+            drv_say("player: bit %u of %x, %u us against %u\n", __builtin_ctz(bit), at, us, base);
+            moved++;
+        }
+    }
+    REG(CLK_CONF) = clk & ~CLK_DUMP_MUX;
+    uint32_t slow = play(&q);
+    REG(CLK_CONF) = clk;
+    dump_bank_take(usage);
+    drv_say("player: of the bits tried %u moved the play's %u us; the mux cleared, the control, %u us\n", moved, base, slow);
 }
 
 static uint32_t grabs;
@@ -409,6 +451,8 @@ void drv_run(struct drv *d, struct self *own)
         e.w10s[0] = 0;
         e.nw10s = 1;
     }
+    uint32_t muxes = config_number(d->conf, d->conf_len, "muxes", 0);
+    uint32_t timebits = config_number(d->conf, d->conf_len, "timebits", 0);
     uint32_t rhythm = config_number(d->conf, d->conf_len, "rhythm", 0);
     uint32_t half = config_number(d->conf, d->conf_len, "half", 50);
     drv_must("a channel of 1 to 13", channel >= 1 && channel <= 13 ? ESP_OK : ESP_FAIL);
@@ -455,7 +499,19 @@ void drv_run(struct drv *d, struct self *own)
             } else if (est) {
                 estimate(&p, &e, lb);
             } else {
+                if (timebits && second == 0) {
+                    for (uint32_t k = 0; k < p.count; k++) {
+                        bank[k] = pattern(&s, k);
+                    }
+                    time_bits(&p);
+                }
+                uint32_t clk = REG(CLK_CONF);
+                if (muxes) {
+                    REG(CLK_CONF) = second % 2u ? clk & ~CLK_DUMP_MUX : clk | CLK_DUMP_MUX;
+                    drv_say("player: the dump clock's mux %u\n", (REG(CLK_CONF) & CLK_DUMP_MUX) != 0);
+                }
                 play_second(second, &p, &s, loop, lb, tone, conf.hex);
+                REG(CLK_CONF) = clk;
             }
             second++;
         }

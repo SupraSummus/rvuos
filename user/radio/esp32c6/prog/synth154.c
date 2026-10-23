@@ -20,6 +20,8 @@
  * conjs=, 1 sends the frame's mirror, its Q negated; lbs=, the loopback's gain, 0x20 by default;
  * gaps=, as above, GAP_DEFAULT by default, below 0 as many played twice;
  * dsts=, the ping's destination, the nRF52840's 0x5284, 21124, by default: another is a control, a ping it does not acknowledge.
+ * slows=1 plays the frame at 16 MS/s, 8 samples a chip, CLK_DATA_DUMP_MUX cleared while it plays, see hw/dump.md, "A player":
+ * a ping then fits one play.
  * Each is a list in decimal, commas between, a minus allowed in offs=, up to SETTINGS_MAX long,
  * and a list of one holds for every setting; the frames take the settings in turn,
  * so that one run, every setting in the same while and the same air, measures them all against each other.
@@ -72,8 +74,12 @@ DRV_PROGRAM("802.15.4 frames from the player", DRV_NEED_DUMP);
 #define GAP_DEFAULT  4 /* the second play starts some 2 samples late, hw/dump.md "A frame made up" */
 #define SETTINGS_MAX 16u
 #define SAMPLE_HZ    40000000
+#define SLOW_HZ      16000000 /* the player's rate with CLK_DATA_DUMP_MUX cleared, hw/dump.md "A player" */
+#define CLK_CONF     (MODEM_SYSCON_BASE + 0x4u)
+#define CLK_DUMP_MUX (1u << 21)
 
 #define SAMPLES_A_CHIP 20u /* 40 MS/s at 2 Mchip/s */
+#define SLOW_A_CHIP    8u  /* 16 MS/s */
 #define FRAME_MAX      24u
 #define FCS_POLY       0x8408u /* CRC-16 ITU-T, its bits reversed, as 802.15.4 sends them */
 #define PAN_RVUOS      0x7276u
@@ -156,8 +162,14 @@ static void spell(const uint8_t *frame, uint32_t bytes)
 }
 
 struct setting {
-    int32_t amp, off_khz, conj, lb, gap, dst;
+    int32_t amp, off_khz, conj, lb, gap, dst, slow;
 };
+
+/* The half sine's kth sample of 2 spc, of 20 or 8 samples a chip. */
+static int32_t half_of(uint32_t k, uint32_t spc)
+{
+    return spc == SAMPLES_A_CHIP ? half_sine[k] : sine(k * 8u);
+}
 
 /*
  * The frame's samples into the bank, I in bits 0 to 9 and Q in 10 to 19, as the player takes them:
@@ -166,18 +178,19 @@ struct setting {
  */
 static uint32_t make(const uint8_t *frame, uint32_t bytes, const struct setting *s, int32_t shift_hz)
 {
-    uint32_t chips = bytes * 64u, total = chips * SAMPLES_A_CHIP + SAMPLES_A_CHIP;
+    uint32_t spc = s->slow ? SLOW_A_CHIP : SAMPLES_A_CHIP;
+    uint32_t chips = bytes * 64u, total = chips * spc + spc;
     uint32_t phase = 0, rest = 0, from = (uint32_t)((int32_t)PLAY_COUNT + s->gap);
     spell(frame, bytes);
-    uint32_t step = (uint32_t)(int32_t)(((int64_t)shift_hz << 32) / SAMPLE_HZ);
+    uint32_t step = (uint32_t)(int32_t)(((int64_t)shift_hz << 32) / (s->slow ? SLOW_HZ : SAMPLE_HZ));
     for (uint32_t n = 0, even = 0, at_even = 0, odd = 1, at_odd = 0; n < total; n++) {
-        int32_t i = even < chips ? chip_of[even] * half_sine[at_even] : 0;
-        int32_t q = n >= SAMPLES_A_CHIP && odd < chips ? chip_of[odd] * half_sine[at_odd] : 0;
-        if (++at_even == 2u * SAMPLES_A_CHIP) {
+        int32_t i = even < chips ? chip_of[even] * half_of(at_even, spc) : 0;
+        int32_t q = n >= spc && odd < chips ? chip_of[odd] * half_of(at_odd, spc) : 0;
+        if (++at_even == 2u * spc) {
             at_even = 0;
             even += 2u;
         }
-        if (n >= SAMPLES_A_CHIP && ++at_odd == 2u * SAMPLES_A_CHIP) {
+        if (n >= spc && ++at_odd == 2u * spc) {
             at_odd = 0;
             odd += 2u;
         }
@@ -236,9 +249,12 @@ static void tell(uint32_t n, uint32_t hex)
 }
 
 /* One play of the first count words, and of rest more from the upper half if any, the second as soon as the first ends. */
-static uint32_t play(uint32_t count, uint32_t rest)
+static uint32_t play(uint32_t count, uint32_t rest, uint32_t slow)
 {
-    uint32_t usage = dump_bank_give(), polls = 0;
+    uint32_t usage = dump_bank_give(), polls = 0, clk = REG(CLK_CONF);
+    if (slow) {
+        REG(CLK_CONF) = clk & ~CLK_DUMP_MUX;
+    }
     uint32_t lower = REG(SRAM_USAGE), upper = lower | SRAM_UPPER;
     REG(PLAY) = 0;
     REG(PLAY) = count | PLAY_ENABLE;
@@ -256,6 +272,7 @@ static uint32_t play(uint32_t count, uint32_t rest)
     }
     played_end = osi_now_us();
     REG(PLAY) = 0;
+    REG(CLK_CONF) = clk;
     dump_bank_take(usage);
     return polls < POLLS_MAX;
 }
@@ -294,16 +311,16 @@ static void spread(struct drv *d, const char *key, int32_t dflt, struct setting 
     for (uint32_t k = 0; k < n; k++) {
         int32_t x = got == 0 ? dflt : got == 1 ? v[0] : v[k];
         int32_t *f = field == 0 ? &s[k].amp : field == 1 ? &s[k].off_khz : field == 2 ? &s[k].conj
-                   : field == 3 ? &s[k].lb : field == 4 ? &s[k].gap : &s[k].dst;
+                   : field == 3 ? &s[k].lb : field == 4 ? &s[k].gap : field == 5 ? &s[k].dst : &s[k].slow;
         *f = x;
     }
 }
 
 static uint32_t settings(struct drv *d, struct setting *s)
 {
-    static const char *const keys[6] = { "amps", "offs", "conjs", "lbs", "gaps", "dsts" };
+    static const char *const keys[7] = { "amps", "offs", "conjs", "lbs", "gaps", "dsts", "slows" };
     uint32_t n = 1;
-    for (uint32_t k = 0; k < 6u; k++) {
+    for (uint32_t k = 0; k < 7u; k++) {
         int32_t v[SETTINGS_MAX];
         uint32_t got = list_of(d, keys[k], v);
         n = got > n ? got : n;
@@ -314,11 +331,13 @@ static uint32_t settings(struct drv *d, struct setting *s)
     spread(d, "lbs", 0x20, s, n, 3);
     spread(d, "gaps", GAP_DEFAULT, s, n, 4);
     spread(d, "dsts", ADDR_NRF, s, n, 5);
+    spread(d, "slows", 0, s, n, 6);
     for (uint32_t k = 0; k < n; k++) {
         drv_must("amps= of 0 to AMP_MAX", s[k].amp >= 0 && s[k].amp <= AMP_MAX ? ESP_OK : ESP_FAIL);
         drv_must("offs= within OFF_MAX_KHZ", s[k].off_khz >= -OFF_MAX_KHZ && s[k].off_khz <= OFF_MAX_KHZ ? ESP_OK : ESP_FAIL);
         drv_must("conjs= of 0 or 1", s[k].conj == 0 || s[k].conj == 1 ? ESP_OK : ESP_FAIL);
         drv_must("lbs= of 0 to 255", s[k].lb >= 0 && s[k].lb <= 255 ? ESP_OK : ESP_FAIL);
+        drv_must("slows= of 0 or 1", s[k].slow == 0 || s[k].slow == 1 ? ESP_OK : ESP_FAIL);
         drv_must("dsts= of 16 bits", s[k].dst >= 0 && s[k].dst <= 0xffff ? ESP_OK : ESP_FAIL);
         drv_must("gaps= within GAP_MAX", s[k].gap >= -GAP_MAX && s[k].gap <= GAP_MAX ? ESP_OK : ESP_FAIL);
     }
@@ -413,8 +432,8 @@ void drv_run(struct drv *d, struct self *own)
             looped = 1;
             looped_lb = (uint32_t)t->lb;
         }
-        uint32_t first = bytes * 64u * SAMPLES_A_CHIP + SAMPLES_A_CHIP;
-        unended += !play(first < PLAY_COUNT ? first : PLAY_COUNT, rest);
+        uint32_t spc = t->slow ? SLOW_A_CHIP : SAMPLES_A_CHIP, first = bytes * 64u * spc + spc;
+        unended += !play(first < PLAY_COUNT ? first : PLAY_COUNT, rest, (uint32_t)t->slow);
         sent[k]++;
         plays++;
         if (hear != 0 && plays % hear == 0) {
@@ -441,8 +460,8 @@ void drv_run(struct drv *d, struct self *own)
     drv_say("synth154: %u frames played, %u unended, in %u us, the last made in %u us\n", plays, unended,
             (uint32_t)(osi_now_us() - start), made_us);
     for (uint32_t k = 0; k < n; k++) {
-        drv_say("synth154: setting %u: amp %d, off %d kHz, conj %d, lb %d, gap %d, dst %x: %u frames\n", k, s[k].amp,
-                s[k].off_khz, s[k].conj, s[k].lb, s[k].gap, (uint32_t)s[k].dst, sent[k]);
+        drv_say("synth154: setting %u: amp %d, off %d kHz, conj %d, lb %d, gap %d, dst %x, slow %d: %u frames\n", k, s[k].amp,
+                s[k].off_khz, s[k].conj, s[k].lb, s[k].gap, (uint32_t)s[k].dst, s[k].slow, sent[k]);
     }
 
     for (;;) {

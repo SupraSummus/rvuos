@@ -54,6 +54,9 @@ A change to `drv_phy_loopback` or `drv_phy_tone` in `phy.c`, or to `prog/loopbac
 `dump=2048` and `dumphex=2048`, and `user/radio/esp32c6/tools/dump-spectrum.py LOG 80e6 2048` must find,
 as `hw/phy.md`, "The loopback", says, every quiet loopback's words within a few counts,
 and every tone's line at +5.00 MHz, 70 dB or more over the median.
+A change to `muxes=` of `prog/loopback.c` runs it so with `muxes=1` and `run=10` as well,
+and the tone's line must stand at 5.00 MHz of each capture's rate, 80, 32, 40, 16, 26.67, 10.67, 16 and 6.4 MS/s in turn,
+folded in at the last, as `hw/dump.md` says.
 A change to `rhythm=` or `half=`, or to the nRF52840's `watch=` in `user/thread/root.c` or `user/thread/tools/watch-spectrum.py`,
 runs the loopback with `channel=13`, `step=77`, `rhythm=35` and `half=50` while the nRF52840 watches channel 25 with `watch=10`,
 and `prog/i154.c` on channel 25 with `stream=7` under the same watch, its positive control:
@@ -77,6 +80,10 @@ A change to `kind=1`, `gaps=`, `hear=` or `user/radio/esp32c6/tools/demod154.py`
 `dsts=21124,21124,4660` and `hear=4` while the nRF52840 exchanges on channel 24 with `run=20` and `survey=0`,
 and `demod154.py LOG 16e6 -2e6` must read acknowledgements with sequence numbers 0 and 1 after the first two settings' pings,
 their FCS right, and none after the third's, as `hw/dump.md`, "Frames longer than a play, and the answer heard", says.
+A change to `muxes=` of `prog/player.c` runs it with `count=16383` and `muxes=1`: the seconds with the mux cleared must take some 1028 us,
+the others 414, as `hw/dump.md`, "A player", says.
+A change to `slows=` of `prog/synth154.c` runs synth154 with `slows=0,1,1` and `amps=511,511,0` and `send=40`
+while the nRF52840 listens on channel 24 with `listen=15`: settings 0 and 1 must come about as often, setting 2 never.
 
 ### The register map
 
