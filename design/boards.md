@@ -127,7 +127,8 @@ the random number generator's data register, read only, the eight bytes of LPPER
 since the rest of LPPERI reaches the LP domain's clocks and resets,
 and the IO MUX and the GPIO matrix, the pins, which a program sets as its board wires them,
 as the Wi-Fi system's root task sets the XIAO's RF switch;
-the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives, and its radio, which `user/thread/` drives,
+the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives,
+and its radio, which `user/thread/` drives in 802.15.4's mode and `user/observer/` in BLE's,
 with TIMER2 for what is shorter than a kernel's step, as the kernel's timer keeps TIMER0 and TIMER1,
 and TIMER3 and TIMER4, which routes wire to the radio;
 QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;

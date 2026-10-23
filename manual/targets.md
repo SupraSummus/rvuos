@@ -259,7 +259,8 @@ every device line reaches both cores' controllers, of which only the first core'
 nothing is written to flash, and a program that never halts runs on once the runner stops, until the chip is reset.
 The console is a block of RAM, which the runner follows as the core runs, with no pin wired.
 `--text address:file` leaves a text in RAM before the core starts, as the other boards' runners do;
-`make BOARD=nrf52840 thread` leaves `THREAD_CONFIG`'s file in the input region, `user/thread/`'s configuration.
+`make BOARD=nrf52840 thread` leaves `THREAD_CONFIG`'s file in the input region, `user/thread/`'s configuration,
+and `make BOARD=nrf52840 observer` `OBSERVER_CONFIG`'s, `user/observer/`'s.
 
 Memory map:
 
@@ -474,6 +475,7 @@ make BOARD=nrf52840 test escape                        # boot the demo and the e
 make BOARD=nrf52840 build/nrf52840/kernel-blink.elf    # user/blink.c, which blinks the LED of a Fanstel BT840X
 tools/nrf52840-run.py build/nrf52840/kernel-blink.elf  # load it, and print its console until Ctrl-C
 tools/thread-pair.sh                                   # user/thread/: 802.15.4's frames between it and an ESP32-C6
+user/observer/le-observer.py --channel 19 --seconds 10         # user/observer/: BLE's test packets counted, and how strong
 ```
 
 On ARM, under QEMU:
