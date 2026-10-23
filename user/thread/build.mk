@@ -1,6 +1,6 @@
 # Thread on IEEE 802.15.4, see user/thread/root.c: so far frames between the nRF52840 and the ESP32-C6,
 # which tools/thread-pair.sh runs both of.
-# THREAD_CONFIG names a file of key=value lines, channel=, power=, run=, stream=, survey=, load=, watch=, sweep= and listen=, see root.c,
+# THREAD_CONFIG names a file of key=value lines, channel=, power=, run=, stream=, survey=, load=, watch=, sweep=, listen= and carrier=, see root.c,
 # which the runner leaves in the input region; with none the region gets an empty one,
 # since the board's RAM keeps the last run's.
 THREAD_INPUT_AT := $(call board_hex,INPUT_BASE,kernel/board/nrf52840/board.h)

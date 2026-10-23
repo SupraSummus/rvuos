@@ -201,6 +201,60 @@ Open questions of the sampler, beside `TODO.md`'s:
   nor whether `0x600A210C`'s fields other than bit 7 matter.
 - The line 1 MHz from the middle on the BLE side.
 
+## The clocks' source
+
+ESP-IDF's headers say (`clk_tree_defs.h`, `clk_tree_ll.h`): the 40 MHz crystal drives the BBPLL, which ESP-IDF calls the SPLL,
+at 480 MHz, 40 MHz times its feedback divider `OC_DIV_7_0`, 8, and 4, written over the analog I2C, block 0x66;
+80, 160 and 240 MHz are fixed divisions of it, the processor's 160 among them, and ESP-IDF asserts no other frequency on the C6.
+MODEM_SYSCON's `CLK_CONF1` has enables of the modem's clocks of 22 to 480 MHz, and no field that divides one.
+
+`prog/bbpll.c` writes the divider 7, 440 MHz, in every other second, as ESP-IDF's `rtc_clk_bbpll_configure` writes it,
+the calibration held and its `CAL_DONE` awaited, the processor still on the PLL, as a program reaches no PCR,
+and 480 MHz again within half a millisecond, before anything is told, as the console's USB runs on the PLL too:
+38 times in a run, the chip and the console went on as before.
+Meanwhile it captured the nRF52840's unmodulated carrier on 2405 MHz, `carrier=` of `user/thread/root.c` at -20 dBm,
+the C6 on Wi-Fi's channel 1, 2412 MHz (measured, `div=7`, the even seconds at 480 the run's control):
+
+- The carrier's line stood at -0.088294 of the capture's rate at 480 MHz, over 9 seconds within 0.000008,
+  and at -0.096317 at 440, over 8 within 0.000007: 1.09087 times as far, where 480 / 440 is 1.09091.
+  So the dump engine's clock, and the ADC's samples it takes, come from the BBPLL:
+  at 440 MHz they come at 73.33 MS/s, and the line lies at -7.0633 MHz, against -7.0635 at 480.
+  So the receiver's local oscillator did not move: the RFPLL takes the crystal, not the BBPLL.
+- A capture of 16383 words took 209 to 210 us in both, timed by the kernel's clock,
+  which counts the processor's cycles, `kernel/board/esp32c6/timer.c`, and so moved with the PLL as the engine did.
+- The transmit tone generator's tone, looped back, stood at 0.0625 of the rate in both (`tonemoved=1`):
+  the generator, the DAC and the engine share the BBPLL's clock, and at 440 MHz the tone lay at 4.58 MHz, not 5.00.
+- The carrier's line in the capture's first 1024 words and in its last, 16383 words on, stood within 0.00006 of the rate
+  at 440 MHz as at 480: the PLL had settled once `CAL_DONE` was seen and the 10 us after.
+
+So the radio's baseband, ADC, DAC, modems and dump engine, runs at a fraction of the BBPLL, and its RF at the crystal's.
+
+The BBPLL's registers read 18 25 50 08 6b 80 73 00 c2 96 03 from 0 to 10 at 480 MHz, as `prog/bbpll.c` tells them:
+register 4, 0x6b, is `DIV_ADC` 2, `DIV_DAC` 0, `DIV_CPU` 1, `MODE_HF` 1, `ENB_VCON` 1, `RSTB_DIV_ADC` 1;
+register 8, 0xc2, the lock, the calibration's end and its capacitor 2.
+`prog/bbpll.c`'s `sets=` writes one in turn, each second against its own control at 480 MHz, the nRF52840's carrier in both
+(measured; the captures attributed by their number, three a second, as the kernel's log may drop a second's line):
+
+- The feedback divider from 4 to 10 put the PLL at 320.0, 360.0, 400.0, 440.1, 520.1 and 559.9 MHz,
+  the carrier's line moving by 480 over each within 0.0003, the local oscillator unmoved, the chip running on;
+  the calibration chose the VCO's capacitor 6, 5, 3, 2, 1 and 0 for 320 to 560, and at 480 2 or 1 by where it came from,
+  and flagged no underflow or overflow: the bands overlap, and 320 to 560 MHz is all within its reach.
+- `DIV_ADC` 3 changed nothing seen; 0 and 1 left the carrier where it was and added copies of it a quarter and a half
+  of the rate away, some 15 to 20 dB below it: the ADC's samples held four of the engine's 80 MHz words each, the ADC at 20 MHz,
+  though no two words were equal, so something filters between. `MODE_HF` cleared did the same.
+  So the ADC's clock is the BBPLL's own output, `DIV_ADC` its divider, apart from the digital clocks and the processor's.
+- `RSTB_DIV_ADC` cleared, the ADC's divider held in reset, left no line at all; `DIV_CPU` cleared left the carrier 40 dB weaker.
+- `TSCHGP` turned over cleared the lock bit, and the carrier's line stood where it was at the capture's start
+  and 0.019 of the rate away at its end, 16383 words on: the VCO drifting free.
+- `ENB_VCON` turned over changed nothing seen.
+- `DIV_DAC` set, the tone looped back on channel 7 (`tonemoved=1`, `sets=4^10,3:8`, the second a control):
+  the tone at +5 MHz 3 dB weaker, its second harmonic at +10 MHz 53 dB over the median against 21 in the control,
+  its mirror at -5 MHz 44 against 20, -10 MHz 43, and lines at +1.41, +8.59 and -6.41 MHz, 1.41 MHz from those:
+  not a DAC at half the rate alone, whose copies 35 MHz away the receiver's filter would hide, but one whose I and Q are skewed.
+
+Moving the BBPLL scales every rate of the baseband at once and leaves the carrier where it is;
+the tone is let out only once a run without it has shown that, as a carrier that moved with it would leave the band.
+
 ## What ESP-SDR found that is not tried here
 
 ESP-SDR's description and firmware, GPL-3.0, name these for the ESP32-C6; they are facts to try, not yet the board's.

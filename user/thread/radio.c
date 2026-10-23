@@ -176,6 +176,13 @@ void radio_mhz(struct radio *r, uint32_t mhz)
     REG(r, FREQUENCY) = mhz - 2400u;
 }
 
+void radio_carrier(struct radio *r)
+{
+    radio_off(r);
+    /* Ramped up with nothing to start, the transmitter idles on the air sending its carrier. */
+    REG(r, TASKS_TXEN) = 1;
+}
+
 int32_t radio_power(struct radio *r, int32_t dbm)
 {
     uint32_t i = 0;

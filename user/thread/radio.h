@@ -82,6 +82,9 @@ void radio_channel(struct radio *r, uint32_t channel);
 #define RADIO_MHZ_LAST  2483u
 void radio_mhz(struct radio *r, uint32_t mhz);
 
+/* On the air with its carrier alone, unmodulated, at the frequency and power set, until radio_off. */
+void radio_carrier(struct radio *r);
+
 /* The power the radio sends at from now on: the most of the chip's steps that is no more than dbm; it returns that. */
 int32_t radio_power(struct radio *r, int32_t dbm);
 

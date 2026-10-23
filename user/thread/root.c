@@ -24,6 +24,7 @@
  * watch=, seconds up to WATCH_S_MAX, replaces the exchange with a watch of the power on channel=, see watch_power,
  * and watchmax=1 keeps each block's strongest sample rather than its mean;
  * listen=, seconds up to WATCH_S_MAX, replaces it with every frame heard on channel=, see listen_frames;
+ * carrier=, seconds up to WATCH_S_MAX, replaces it with the radio's carrier alone on channel=, at power=, see send_carrier;
  * sweep=, seconds up to WATCH_S_MAX, replaces it with a sweep of the power from from= to to=, in MHz within the band,
  * 2400 to 2483, off the channels' grid, see sweep_power;
  * load=, units of the processor's 64 up to 32, has a thread beside the link's earn them and compute without end,
@@ -159,7 +160,7 @@ static uint32_t wait_for(uint32_t want)
 
 /* What the configuration asks for. */
 struct config {
-    uint32_t channel, run_s, stream, load, watch_s, sweep_s, from_mhz, to_mhz, listen_s;
+    uint32_t channel, run_s, stream, load, watch_s, sweep_s, from_mhz, to_mhz, listen_s, carrier_s;
     int32_t power;
     bool survey, watch_max;
 };
@@ -204,6 +205,8 @@ static void configure(struct config *c)
     c->watch_max = config_number(conf, size, "watchmax", 0) != 0;
     c->listen_s = config_number(conf, size, "listen", 0);
     c->listen_s = c->listen_s > WATCH_S_MAX ? WATCH_S_MAX : c->listen_s;
+    c->carrier_s = config_number(conf, size, "carrier", 0);
+    c->carrier_s = c->carrier_s > WATCH_S_MAX ? WATCH_S_MAX : c->carrier_s;
     c->sweep_s = config_number(conf, size, "sweep", 0);
     c->sweep_s = c->sweep_s > WATCH_S_MAX ? WATCH_S_MAX : c->sweep_s;
     c->from_mhz = config_number(conf, size, "from", RADIO_MHZ_FIRST);
@@ -628,6 +631,25 @@ static void sweep_power(const struct config *c)
     }
 }
 
+/*
+ * The carrier: the radio on the air on the channel for carrier_s seconds, unmodulated, at the power asked,
+ * a line of known frequency for another receiver to measure its own clocks against.
+ */
+static void send_carrier(const struct config *c)
+{
+    struct alarm *a = &link.alarm;
+    radio_channel(&link.radio, c->channel);
+    int32_t dbm = radio_power(&link.radio, c->power);
+    radio_carrier(&link.radio);
+    uint32_t start = alarm_now(a);
+    while (alarm_now(a) - start < c->carrier_s * US_PER_S) {
+        sleep_us(WATCH_PAUSE_US);
+    }
+    radio_off(&link.radio);
+    say(&cout, "carrier: channel %u, %u MHz, %d dBm, %u us\n", c->channel, RADIO_CHANNEL_MHZ(c->channel), dbm,
+        alarm_now(a) - start);
+}
+
 #define LISTEN_KEEP  16u /* frames told whole */
 #define LISTEN_BYTES 12u /* of each, from its frame control field */
 #define LISTEN_SETTINGS 16u
@@ -744,6 +766,11 @@ int main(void)
     if (c.listen_s != 0) {
         listen_frames(&c);
         say(&cout, "thread: listened\n");
+        rv_halt(BOOT_CAP_HALT, 0);
+    }
+    if (c.carrier_s != 0) {
+        send_carrier(&c);
+        say(&cout, "thread: carried\n");
         rv_halt(BOOT_CAP_HALT, 0);
     }
     if (c.sweep_s != 0) {
