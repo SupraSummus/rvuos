@@ -490,6 +490,22 @@ a channel's offset, which differs from power-up to power-up, holds it against a 
 is a hypothesis; at 4 and 5 the noise may lie under a step.
 `--gain` takes 60 estimates once the gain is held and stops if a channel reads 0 in all.
 
+### The receiver's passband
+
+Across its channel, **measured**, an nRF52840's carrier on 2440 MHz at 8 dBm, the radio retuned over the bridge
+by the synthesizer's word and its calibration's steps, `0x8720a4`'s, so that the carrier lay at each offset below it,
+the gain held at 10, 7 and 0, and the median of I^2 + Q^2 over 120 estimates at each:
+
+| Offset, MHz | 0.5 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 12 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Median | 9 | 13 | 20 | 25 | 26 | 25 | 20 | 18 | 20 | 18 | 5 | 1 |
+
+Flat within 2 dB from 2 to 9 MHz, 7 dB down at 10 and gone at 12: the channel's 20 MHz.
+Toward 0 Hz it falls, 4 dB at 0.5 MHz, as the removal of the offset reaches, see "The receiver's gain".
+The transmitter's low-pass filter's registers, `0x072` to `0x077`, set to each of the modes 0, 1, 3 and 5 of `0x8719a8`'s tables,
+for the firmware's mode 2, changed none of it by more than the readings' own spread, **measured**:
+that filter is not the receiver's, or not the narrowest the receiver has.
+
 ### The control: the calibration's tones
 
 The firmware's receive IQ calibration, `0x872770`, **known**,
@@ -563,13 +579,22 @@ Of the 31, six differ between channels:
 
 `0x066`, which reads 22360 - 8f, no code writes: the synthesizer's calibration leaves it, a hypothesis.
 
-`cyw43-iq.py --tune MHZ` tunes the radio off the channels by the same function, **measured** as far as the radio:
+`cyw43-iq.py --tune MHZ` tunes the radio off the channels by the same function, **measured**:
 its code on the WLAN's processor copies the nearest channel's entry, writes the frequency into its MHz and `0x055`'s,
 and the word, f·3·2^18/37.4 rounded down, into `0x04e` and `0x04f`'s, points the LCN20's state's word at `0x620`, the table's, at that entry,
 calls `0x8714e4` with channel 1, and points it back; the PHY's words of the frequency stay the channel's.
 At 2415, 2435, 2437 and 2455 MHz the radio read the word back as written and `0x065` bit 0 set, the synthesizer locked.
-Where the signals then fall is not yet measured: frames of 802.15.4 on 2435 MHz showed in the estimates tuned there and 20 MHz away alike,
-among the access points' own around channel 6, whose bursts at about 1 MS/s fold over one another.
+A carrier where it is meant to be shows so, **measured**, an nRF52840's unmodulated carrier, its radio idle in transmission,
+on 2440 MHz at 8 dBm, and runs of `--mode stream`, 10180 samples, the AGC free:
+the sample's square, the carrier at twice its offset, was strongest at +199.97, -200.16 and -400.20 kHz
+tuned to 2439.85, 2440.05 and 2440.15 MHz, 100.03, 100.16 and 100.20 kHz under twice the offset from 2440,
+the same within 0.2 kHz, so that the carrier lay 50 kHz under 2440 MHz by this crystal, 20 ppm, the two crystals' difference;
+on channel 6 tuned by the firmware it lay 95.4 kHz under, and tuned to 2439.9 by this 96.8, while the nRF52840 warmed.
+So the tuning moves the receiver by what it is asked, to well within a kHz.
+Tuned to 2439.95 MHz, the carrier at 0 Hz, the samples held a median power of 4 for the others' 2000 and more:
+the PHY's removal of the offset takes a carrier at 0 Hz with it.
+Held at 10, 7 and 0, the carrier 100 kHz off was gone too, a median of 1, while 3 MHz off, on channel 6, it held 25:
+with the gain held, the removal of the offset reaches further from 0 Hz, a hypothesis.
 
 The PHY's words of the frequency, which the readouts fitted, are the code's:
 `0x657` is `((f << 2) / 5 + 1) >> 1`, `0x658` is `(0x500000 / f + 1) >> 1`,
@@ -581,7 +606,12 @@ as the readouts' `0x140`, `0x500` and `0x280`, and `0xc9`, `0x985` and `0x4cf`, 
 ### Tables of values
 
 - Radio registers `0x0a9` to `0x0dc` take 52 bytes from the ROM at `0x89027c`, and `0x0dd` to `0x114` 56 halfwords from `0x89020c`, in `0x871fe0`.
-- Radio registers `0x072` to `0x077` take values the RAM firmware computes, at `0x10480`: the readouts' registers that differ from run to run without the channel.
+- Radio registers `0x072` to `0x077` take values the RAM firmware computes, at `0x10480`, the ROM's `wlc_lcn20phy_radio20692_lpf_tx_set` patched:
+  the readouts' registers that differ from run to run without the channel, **read**.
+  `0x072`, `0x073`, `0x074` and `0x076` are rows of tables, six modes of 15 columns at `0x88ffac`, `0x89006c` and `0x890120`, and a word a mode at `0x890060`,
+  each scaled by the LCN20 state's halfword at `0x5ae`, a calibration's result about 4350, over 2^15; `0x077` a mode's byte at `0x88fda6`;
+  `0x0a3` bits 0 to 4 and 13 set.
+  With an access point up they read mode 2, column 2, to the last bit.
 - The transmitter's digital filters: `0x870a28` writes 17 registers from a row of a table chosen by a type,
   for CCK `0x910`, `0x91e` to `0x929`, `0x930` to `0x932` and `0x912`, 17 types at `0x88f68c`,
   and for OFDM `0x90f`, `0x900` to `0x90e` and `0x911`, 18 types at `0x88f8f0`:
