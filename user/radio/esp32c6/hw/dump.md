@@ -210,11 +210,59 @@ bit 31 set, then a wait for bit 18, as a capture waits for its own; after 10 ms 
 An engine that sends what the bank holds, as a hypothesis from that.
 On the ESP32-C6, and the C5, C61, H2, S31 and C2, `dactrig` only fills the bank, `0x40840000` on the C6, and writes no register,
 and `fedump_wr_txmem` returns at once: if the C6 has a player, its library no longer says where.
-The C3's capture block is laid out apart from the C6's, its lanes 0x34 past the control where the C6's are 0x10,
-so eight bytes past the control, the C6's source word `0x600A9008`, says nothing.
+Eight bytes past the C6's capture control, `0x600A9004`, is `0x600A900C`, and it is the player (measured, below).
 
 `prog/dacprobe.c` reads the block's words and, with `write=1`, writes each of the unexplained ones with a count and bit 31,
 the transmitter powered down, and tells what moves.
 Read on channel 6 (measured, `prog/dacprobe.c`, no keys): `0x00` 0, `0x04` 0, `0x08` 0x78000 (source 15), `0x0C` 0, `0x10` 0,
 `0x14` 0xC2040 (lanes 0 to 3), `0x18` 0, `0x1C` 0, `0x20` the date word 0x02202221, and `0x24` to `0x3C` 0.
-The writes are not yet run.
+Written with 4096 and bit 31 (measured, `write=1`): `0x0C` sets its bit 18 a while later, as `dactrig` waits for;
+`0x10` keeps what is written and nothing moves; `0x00`, `0x18` and `0x1C` read 0 again.
+
+`prog/player.c` drives it (measured on channel 6):
+
+| Word | Bits | What |
+|---|---|---|
+| `0x600A900C` | 0 to 13 | the words the player plays, from the bank's first |
+| | 15 | set, a word every 12.5 ns, 80 MS/s; clear, every 25 ns, 40 MS/s |
+| | 16 | nothing seen |
+| | 18 | set once the words are played |
+| | 19 | set, the player plays round and round and never sets bit 18 |
+| | 20 to 27 | nothing seen, where the C3's `dactrig` writes the count's low byte |
+| | 31 | the player on |
+| `0x600A9010` | 28, 29 | the first word played, in pages of 4096 words, 16 KiB: 0 to 3 |
+| | others | kept as written, nothing seen of bits 0 to 27 or 30 |
+| HP_SYSTEM `SRAM_USAGE` `0x60095004` | 16 | `MAC_DUMP_ALLOC`, set, the pages are the bank's upper 64 KiB |
+
+- 16383 words take 414 us with bit 15 clear and 209 us with it set, as long as a capture of as many at 80 MHz takes;
+  the bank's words are as they were afterwards.
+- What the player sends is read best through the modem's IQ estimate, `dc_iq_est_new` in `phy.c`,
+  which the receive DC calibration takes: the receiver's mean I and Q over a count, from no word of the bank's.
+  Looped back, the player round and round over 4096 words of one word each, `prog/player.c` with `est=1` (measured):
+  a word of 0 moves the mean nothing; +64 in bits 0 to 9 by (+25, -24) and -64 there, 0x3C0, by (-25, +24);
+  +64 in bits 10 to 19 by (+23, +25), a quarter turn on, and -64 there by (-26, -26);
+  bit 9 alone, 0x200, by (-200, +196), as -512 would; bit 20 and bit 30 alone, nothing.
+  So each sample is two fields of ten bits in two's complement, a quarter turn apart, linear,
+  some 0.39 of the receiver's counts a count at `lb=0x20`, the loopback's own phase turning them by a run's angle.
+- With `0x600A9010` written 0x10000000 the player played the words from 4096, and with 0x20000000 those from 8192;
+  0x70000000 played as 0x30000000 did, and 0x80001000, 0xFFFFFFFF and every value without bit 28 or 29 played from 0.
+  With `MAC_DUMP_ALLOC` set it played the words from 16384, the upper half's first.
+- While the engine holds the bank, the CPU loses all of it, `MAC_DUMP_ALLOC` set or not:
+  with the player round and round over the upper half, the CPU's writes to the lower half read back as nothing,
+  and were gone once the bank was the CPU's again (`est=2`).
+  So the CPU cannot fill one half while the player plays the other; a stream would want a second bank, as a capture's does.
+- The words go to the transmitter's DAC, a word a sample, I in bits 0 to 9 and Q in 10 to 19,
+  the other way round from a capture's, as the nRF52840's sweep of the power a MHz at a time showed,
+  `sweep=` of `user/thread/root.c`, the C6 on channel 6 looped back, `loop=1`, playing throughout, `rhythm=40 half=0`:
+  a tone of four words' period with the cosine in bits 10 to 19 stood at 2427 and 2428 MHz, 10 MHz below the middle,
+  3.5 and 4.4 dB over a run with nothing played; with the cosine in bits 0 to 9, `swap=1`, at 2447 and 2448 MHz, 10 MHz above;
+  with bit 15, at 2417 and 2418, 20 MHz below; and a constant word at 2437 and 2438, the carrier.
+  That the samples are ten bits each is a hypothesis.
+- The transmit tone generator, `drv_phy_tone`, takes the DAC from the player while it is on: nothing of the player's is heard then.
+- With bit 19 the player went on after the program had stopped and the kernel had halted,
+  and the word read 0x80089000 after the next reset, as the modem keeps its state:
+  `prog/player.c` writes the word 0 before it does anything else.
+- A capture started while the player plays shares its place in the bank: it writes from the word the player has reached
+  to the count's end and nothing from the bank's first, its words twice each, and the play ends sooner, 142 to 151 us for 16383 words,
+  and what it writes the player may then play, so it is no clean witness of what was sent.
+  Through it, looped back, a tone of 32 words' period, one of a quarter the amplitude, and a constant word each came back as such.

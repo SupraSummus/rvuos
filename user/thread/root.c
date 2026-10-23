@@ -23,6 +23,8 @@
  * survey=0 leaves the survey of the channels out;
  * watch=, seconds up to WATCH_S_MAX, replaces the exchange with a watch of the power on channel=, see watch_power,
  * and watchmax=1 keeps each block's strongest sample rather than its mean;
+ * sweep=, seconds up to WATCH_S_MAX, replaces it with a sweep of the power from from= to to=, in MHz within the band,
+ * 2400 to 2483, off the channels' grid, see sweep_power;
  * load=, units of the processor's 64 up to 32, has a thread beside the link's earn them and compute without end,
  * as a node does that has more to do than its link, so that the link's thread waits for its turn when it wakes,
  * up to a request of its; it runs no more than its units earn, with no spare time, and there is none by default.
@@ -156,7 +158,7 @@ static uint32_t wait_for(uint32_t want)
 
 /* What the configuration asks for. */
 struct config {
-    uint32_t channel, run_s, stream, load, watch_s;
+    uint32_t channel, run_s, stream, load, watch_s, sweep_s, from_mhz, to_mhz;
     int32_t power;
     bool survey, watch_max;
 };
@@ -199,6 +201,12 @@ static void configure(struct config *c)
     c->watch_s = config_number(conf, size, "watch", 0);
     c->watch_s = c->watch_s > WATCH_S_MAX ? WATCH_S_MAX : c->watch_s;
     c->watch_max = config_number(conf, size, "watchmax", 0) != 0;
+    c->sweep_s = config_number(conf, size, "sweep", 0);
+    c->sweep_s = c->sweep_s > WATCH_S_MAX ? WATCH_S_MAX : c->sweep_s;
+    c->from_mhz = config_number(conf, size, "from", RADIO_MHZ_FIRST);
+    c->to_mhz = config_number(conf, size, "to", RADIO_MHZ_LAST);
+    c->from_mhz = c->from_mhz < RADIO_MHZ_FIRST || c->from_mhz > RADIO_MHZ_LAST ? RADIO_MHZ_FIRST : c->from_mhz;
+    c->to_mhz = c->to_mhz < c->from_mhz || c->to_mhz > RADIO_MHZ_LAST ? RADIO_MHZ_LAST : c->to_mhz;
     must("uninstall the input", region_free(&self, region));
 }
 
@@ -558,6 +566,65 @@ static void watch_power(const struct config *c)
     }
 }
 
+#define SWEEP_DWELL_US 1000u
+#define SWEEP_MHZ_MAX  (RADIO_MHZ_LAST - RADIO_MHZ_FIRST + 1u)
+
+static uint32_t swept_sum[SWEEP_MHZ_MAX], swept_n[SWEEP_MHZ_MAX], swept_least[SWEEP_MHZ_MAX];
+static uint32_t swept_rounds[SWEEP_MHZ_MAX], swept_peaks[SWEEP_MHZ_MAX];
+
+/*
+ * The sweep: the radio receiving on each MHz from from_mhz to to_mhz in turn, SWEEP_DWELL_US a step, round and round
+ * for sweep_s seconds; each MHz's mean of every sample, its strongest sample, and the mean of each round's strongest,
+ * told once it ends, in sixteenths of a dB below a milliwatt as the watch's,
+ * so that a sender of a few MHz's width shows where it lies, against a run without it.
+ */
+static void sweep_power(const struct config *c)
+{
+    struct alarm *a = &link.alarm;
+    uint32_t width = c->to_mhz - c->from_mhz + 1u, rounds = 0, missed = 0;
+    for (uint32_t k = 0; k < width; k++) {
+        swept_sum[k] = swept_n[k] = swept_rounds[k] = swept_peaks[k] = 0;
+        swept_least[k] = RADIO_RSSI_MAX;
+    }
+    uint32_t start = alarm_now(a);
+    while (alarm_now(a) - start < c->sweep_s * US_PER_S) {
+        for (uint32_t k = 0; k < width; k++) {
+            /* The frequency takes effect as the radio ramps up, which radio_receive_start does from off. */
+            radio_mhz(&link.radio, c->from_mhz + k);
+            radio_receive_start(&link.radio);
+            uint32_t end = alarm_now(a) + SWEEP_DWELL_US, least = RADIO_RSSI_MAX, n = 0;
+            while ((int32_t)(alarm_now(a) - end) < 0) {
+                uint32_t rssi = radio_rssi(&link.radio);
+                if (rssi == RADIO_RSSI_NONE) {
+                    missed++;
+                    continue;
+                }
+                swept_sum[k] += rssi;
+                n++;
+                least = rssi < least ? rssi : least;
+            }
+            if (n != 0) {
+                swept_n[k] += n;
+                swept_least[k] = least < swept_least[k] ? least : swept_least[k];
+                swept_peaks[k] += least;
+                swept_rounds[k]++;
+            }
+        }
+        rounds++;
+    }
+    radio_off(&link.radio);
+    say(&cout, "sweep: %u to %u MHz, %u rounds of %u us a MHz in %u us, %u missed, in 1/%u dB below a mW\n", c->from_mhz,
+        c->to_mhz, rounds, SWEEP_DWELL_US, alarm_now(a) - start, missed, WATCH_SCALE);
+    for (uint32_t k = 0; k < width; k++) {
+        say(&cout, "swept: %u MHz mean %u strongest %u peaks %u\n", c->from_mhz + k,
+            swept_n[k] ? swept_sum[k] * WATCH_SCALE / swept_n[k] : WATCH_NONE, swept_least[k] * WATCH_SCALE,
+            swept_rounds[k] ? swept_peaks[k] * WATCH_SCALE / swept_rounds[k] : WATCH_NONE);
+        if (k % WATCH_LINE == WATCH_LINE - 1u) {
+            sleep_us(WATCH_PAUSE_US);
+        }
+    }
+}
+
 int main(void);
 int main(void)
 {
@@ -596,6 +663,11 @@ int main(void)
     say(&cout, "thread: the radio is on, set for IEEE 802.15.4\n");
     if (c.survey) {
         link_stir(&link, survey_energy());
+    }
+    if (c.sweep_s != 0) {
+        sweep_power(&c);
+        say(&cout, "thread: swept\n");
+        rv_halt(BOOT_CAP_HALT, 0);
     }
     if (c.watch_s != 0) {
         watch_power(&c);

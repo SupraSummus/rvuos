@@ -171,6 +171,11 @@ void radio_channel(struct radio *r, uint32_t channel)
     REG(r, FREQUENCY) = RADIO_CHANNEL_MHZ(channel) - 2400u;
 }
 
+void radio_mhz(struct radio *r, uint32_t mhz)
+{
+    REG(r, FREQUENCY) = mhz - 2400u;
+}
+
 int32_t radio_power(struct radio *r, int32_t dbm)
 {
     uint32_t i = 0;

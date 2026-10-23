@@ -77,6 +77,11 @@ void radio_off(struct radio *r);
 /* The channel the next step uses, RADIO_CHANNEL_FIRST to RADIO_CHANNEL_LAST. */
 void radio_channel(struct radio *r, uint32_t channel);
 
+/* The frequency the next step uses, in MHz from RADIO_MHZ_FIRST to RADIO_MHZ_LAST, off the channels' grid. */
+#define RADIO_MHZ_FIRST 2400u
+#define RADIO_MHZ_LAST  2483u
+void radio_mhz(struct radio *r, uint32_t mhz);
+
 /* The power the radio sends at from now on: the most of the chip's steps that is no more than dbm; it returns that. */
 int32_t radio_power(struct radio *r, int32_t dbm);
 

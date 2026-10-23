@@ -60,6 +60,16 @@ and `prog/i154.c` on channel 25 with `stream=7` under the same watch, its positi
 `user/thread/tools/watch-spectrum.py` must find the tone's line at 10 Hz and the frames' at 7 Hz, each far over the rates beside it,
 and neither at the other's rate.
 
+### The player
+
+A change to `prog/player.c` runs it with `est=1`, `count=4096`, `at=4096`, `w10s=0,10000000` and `raws=0,40,10000,200`,
+and its log must show what `hw/dump.md`, "A player", says: with the block's 0x10 at 0 no word moves the receiver's mean,
+the words it plays all 0, and with 0x10000000 the word 0 none, 40 and 10000 a quarter turn apart,
+and 200 some eight times 40's the other way.
+A change to the nRF52840's `sweep=` in `user/thread/root.c` runs the player with `rhythm=40`, `half=0`, `loop=1`, `period=4` and `amp=200`,
+and again with `swap=1`, while the nRF52840 sweeps from 2417 to 2457 MHz with `sweep=10`, and once with `amp=0`, its control:
+the means at 2427 and 2428 MHz must stand a few dB over the control's in the first, and at 2447 and 2448 in the second.
+
 ### The register map
 
 A change to `prog/regmap.c` or `user/radio/esp32c6/tools/regmap.py` runs the map with `channel=1`, and `user/radio/esp32c6/tools/regmap.py` must put its four passes together.
