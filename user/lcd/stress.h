@@ -1,6 +1,8 @@
 #ifndef RVUOS_LCD_STRESS_H
 #define RVUOS_LCD_STRESS_H
 
+#include "st7789.h"
+
 /*
  * A pattern that shows what goes wrong on a bus driven near its limit, four bands from the top,
  * each for a failure a person sees on the glass, or a camera does, without telling one pixel from the next:
@@ -13,6 +15,6 @@
  *   - stripes 4 pixels wide, red, green, blue and white, in one stream:
  *     a clock lost or gained shifts every bit after it, so from there on the stripes turn to other colours.
  */
-void stress_draw(void);
+void stress_draw(const struct st7789 *lcd);
 
 #endif

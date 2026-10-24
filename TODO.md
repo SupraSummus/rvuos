@@ -318,6 +318,8 @@ what is left:
 ## ESP32-C5
 
 - The modem, the radio and Wi-Fi: nothing yet, nor the devices beyond the five `board.h` lists.
+- The boot measures the core at 192.03 MHz, though `board.c` selects PLL_F160M and `design/boards.md` says 160 MHz;
+  the LCD's refresh, 60.08 Hz by that count and 60 by the ST7789's datasheet, sides with the measurement.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
 - Bus errors are taken late, several instructions past the access, with `mtval` exact and `mepc` past it,

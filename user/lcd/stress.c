@@ -26,10 +26,10 @@ static void put(uint8_t *row, uint32_t x, uint16_t c)
     row[2 * x + 1] = (uint8_t)c;
 }
 
-static void gradient(void)
+static void gradient(const struct st7789 *lcd)
 {
     _Alignas(4) uint8_t row[LCD_W * 2];
-    st7789_begin(0, GRADIENT_Y, LCD_W - 1, GRADIENT_Y + BAND_H - 1);
+    st7789_begin(lcd, 0, GRADIENT_Y, LCD_W - 1, GRADIENT_Y + BAND_H - 1);
     for (uint32_t y = 0; y < BAND_H; y++) {
         for (uint32_t x = 0; x < LCD_W; x++) {
             uint32_t r = x * 31 / (LCD_W - 1), g = y * 63 / (BAND_H - 1);
@@ -40,23 +40,23 @@ static void gradient(void)
     st7789_end();
 }
 
-static void grid(void)
+static void grid(const struct st7789 *lcd)
 {
-    st7789_fill(0, GRID_Y, LCD_W - 1, GRID_Y + BAND_H - 1, RGB565(0, 0, 0));
+    st7789_fill(lcd, 0, GRID_Y, LCD_W - 1, GRID_Y + BAND_H - 1, RGB565(0, 0, 0));
     uint32_t x0 = (LCD_W - (SQUARES_X - 1) * PITCH - SQUARE) / 2;
     uint32_t y0 = GRID_Y + (BAND_H - (SQUARES_Y - 1) * PITCH - SQUARE) / 2;
     for (uint32_t j = 0; j < SQUARES_Y; j++) {
         for (uint32_t i = 0; i < SQUARES_X; i++) {
             uint32_t x = x0 + i * PITCH, y = y0 + j * PITCH;
-            st7789_fill(x, y, x + SQUARE - 1, y + SQUARE - 1, colours[(i + j) % (sizeof(colours) / sizeof(colours[0]))]);
+            st7789_fill(lcd, x, y, x + SQUARE - 1, y + SQUARE - 1, colours[(i + j) % (sizeof(colours) / sizeof(colours[0]))]);
         }
     }
 }
 
-static void checker(void)
+static void checker(const struct st7789 *lcd)
 {
     _Alignas(4) uint8_t row[LCD_W * 2];
-    st7789_begin(0, CHECKER_Y, LCD_W - 1, CHECKER_Y + BAND_H - 1);
+    st7789_begin(lcd, 0, CHECKER_Y, LCD_W - 1, CHECKER_Y + BAND_H - 1);
     for (uint32_t y = 0; y < BAND_H; y++) {
         for (uint32_t x = 0; x < LCD_W; x++) {
             uint32_t odd = (x + y) & 1u;
@@ -67,23 +67,23 @@ static void checker(void)
     st7789_end();
 }
 
-static void stripes(void)
+static void stripes(const struct st7789 *lcd)
 {
     _Alignas(4) uint8_t row[LCD_W * 2];
     for (uint32_t x = 0; x < LCD_W; x++) {
         put(row, x, colours[(x / 4) % 4]);
     }
-    st7789_begin(0, STRIPES_Y, LCD_W - 1, STRIPES_Y + BAND_H - 1);
+    st7789_begin(lcd, 0, STRIPES_Y, LCD_W - 1, STRIPES_Y + BAND_H - 1);
     for (uint32_t y = 0; y < BAND_H; y++) {
         st7789_pixels(row, sizeof(row));
     }
     st7789_end();
 }
 
-void stress_draw(void)
+void stress_draw(const struct st7789 *lcd)
 {
-    gradient();
-    grid();
-    checker();
-    stripes();
+    gradient(lcd);
+    grid(lcd);
+    checker(lcd);
+    stripes(lcd);
 }

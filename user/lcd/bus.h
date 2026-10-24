@@ -29,11 +29,19 @@ void lcd_bus_data(const uint8_t *bytes, uint32_t n);
 /* End the command: the select high. */
 void lcd_bus_end(void);
 
+/*
+ * The next 32 bits the controller sends, after a command and before lcd_bus_end, the first in the top bit.
+ * Whether a command's answer starts with a dummy clock is the command's, so the caller shifts what it takes.
+ * The bus clocks a read no faster than the controller can answer, 6.6 MHz.
+ */
+uint32_t lcd_bus_read(void);
+
 /* The controller's reset pin: held in reset while low is nonzero. */
 void lcd_bus_reset(int low);
 
-/* The backlight: lit while on is nonzero. */
-void lcd_bus_backlight(int on);
+/* The backlight: dark at 0, lit whole at LCD_BACKLIGHT_FULL, and between, lit for level of every 256 parts of the time. */
+#define LCD_BACKLIGHT_FULL 255u
+void lcd_bus_backlight(uint32_t level);
 
 /* Wait at least us microseconds. */
 void lcd_bus_sleep(uint32_t us);

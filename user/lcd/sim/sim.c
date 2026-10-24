@@ -2,9 +2,12 @@
  * The LCD's simulator: app.c run on the host against the model of the board's LCD, panel.c,
  * and what the glass shows written as a PNG, for a person to hold beside the board.
  *
- * Usage: lcd-sim [--scene name] [--mhz n] [--scale n] [--memory file.png] [--every ms dir] glass.png
+ * Usage: lcd-sim [--scene name] [--mhz n] [--madctl n] [--backlight n] [--scale n] [--memory file.png] [--every ms dir]
+ *                glass.png
  *   --scene name       the scene app.c shows, "pattern" unless given, as the board's scene=
  *   --mhz n            the bus's clock, 40 unless given, as the board's mhz=, which only the time depends on
+ *   --madctl n         the orient scene's MADCTL, as the board's madctl=, each of orient.h's in turn unless given
+ *   --backlight n      the backlight's level, 0 to 255, as the board's backlight=, 255 unless given
  *   --scale n          each pixel a square of n by n, 2 unless given
  *   --memory file.png  the controller's whole memory, 240 by 320, with what the glass does not show dimmed,
  *                      which shows a picture that missed the glass
@@ -23,13 +26,19 @@
 #include "panel.h"
 #include "image.h"
 
-#define BOARD_HZ 160000000u /* the ESP32-C5's core, as the kernel sets it */
+#define BOARD_HZ 192030000u /* the ESP32-C5's core, as the kernel's clock reports it */
 
 static uint32_t scale = 2;
 static uint64_t every_ns;
 static const char *frames_dir;
 static uint64_t next_frame_ns;
 static uint32_t frames;
+
+/* The simulated time in the board's cycles, which the board's own clock counts. */
+static uint64_t board_cycles(void)
+{
+    return panel_now_ns() * (BOARD_HZ / 1000u) / 1000000u;
+}
 
 static int write_glass(const char *path)
 {
@@ -77,7 +86,8 @@ static void record(uint64_t now_ns)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: lcd-sim [--scene name] [--mhz n] [--scale n] [--memory file.png] [--every ms dir] glass.png\n");
+    fprintf(stderr, "usage: lcd-sim [--scene name] [--mhz n] [--madctl n] [--backlight n] [--scale n] [--memory file.png] "
+                    "[--every ms dir] glass.png\n");
     exit(2);
 }
 
@@ -85,10 +95,22 @@ int main(int argc, char **argv)
 {
     const char *glass = 0, *memory = 0;
     int scene = APP_PATTERN;
+    struct app_options options = APP_OPTIONS_DEFAULT;
+    struct st7789 lcd;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--scene") == 0 && i + 1 < argc) {
             i++;
             scene = app_scene(argv[i], (uint32_t)strlen(argv[i]));
+        } else if (strcmp(argv[i], "--madctl") == 0 && i + 1 < argc) {
+            options.madctl = (uint32_t)strtoul(argv[++i], 0, 0);
+            if (options.madctl > 0xffu) {
+                usage();
+            }
+        } else if (strcmp(argv[i], "--backlight") == 0 && i + 1 < argc) {
+            options.backlight = (uint32_t)strtoul(argv[++i], 0, 0);
+            if (options.backlight > LCD_BACKLIGHT_FULL) {
+                usage();
+            }
         } else if (strcmp(argv[i], "--mhz") == 0 && i + 1 < argc) {
             panel_bus_mhz((uint32_t)atoi(argv[++i]));
         } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
@@ -112,15 +134,31 @@ int main(int argc, char **argv)
     if (frames_dir != 0) {
         panel_on_time(record);
     }
-    app_run(scene);
+    struct anim_report report;
+    options.clock = board_cycles;
+    options.report = &report;
+    app_run(&lcd, scene, &options);
     panel_on_time(0);
+    if (scene == APP_ANIM) {
+        for (uint32_t phase = 0; phase < ANIM_PHASES; phase++) {
+            printf("lcd-sim: phase %u, %s: %u pictures in %llu cycles, %.2f a second\n", phase,
+                   phase % 2 ? "in sync" : "not in sync", ANIM_PICTURES, (unsigned long long)report.cycles[phase],
+                   (double)ANIM_PICTURES * BOARD_HZ / (double)report.cycles[phase]);
+            printf("lcd-sim:   from start to start %llu to %llu cycles, a picture written in %llu at most, "
+                   "%llu at least from one's end to the next one's start\n",
+                   (unsigned long long)report.shortest_gap[phase], (unsigned long long)report.longest_gap[phase],
+                   (unsigned long long)report.longest_write[phase], (unsigned long long)report.least_slack[phase]);
+        }
+    }
 
     uint64_t ns = panel_now_ns();
     printf("lcd-sim: drawn in %llu cycles at least, %.3f ms, %llu bytes on the bus\n",
-           (unsigned long long)(ns * (BOARD_HZ / 1000000u) / 1000u), (double)ns / 1e6, (unsigned long long)panel_bytes());
+           (unsigned long long)board_cycles(), (double)ns / 1e6, (unsigned long long)panel_bytes());
     if (frames_dir != 0) {
         printf("lcd-sim: %u frames in %s\n", frames, frames_dir);
     }
+    /* A frame more, for the refresh to show the whole of what was drawn. */
+    lcd_bus_sleep(ST7789_FRAME_US + 100u);
     if (write_glass(glass) != 0 || (memory != 0 && write_memory(memory) != 0)) {
         return 1;
     }

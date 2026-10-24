@@ -3,11 +3,12 @@
 #include "app.h"
 
 #include "bus.h"
+#include "orient.h"
 #include "pattern.h"
 #include "st7789.h"
 #include "stress.h"
 
-static const char *const names[APP_SCENES] = { "pattern", "stress" };
+static const char *const names[APP_SCENES] = { "pattern", "stress", "probe", "orient", "timing", "anim" };
 
 int app_scene(const char *name, uint32_t n)
 {
@@ -23,14 +24,20 @@ int app_scene(const char *name, uint32_t n)
     return -1;
 }
 
-void app_run(int scene)
+void app_run(struct st7789 *lcd, int scene, const struct app_options *options)
 {
-    st7789_init();
-    st7789_fill(0, 0, LCD_W - 1, LCD_H - 1, RGB565(0, 0, 0));
-    lcd_bus_backlight(1);
+    st7789_init(lcd);
+    st7789_fill(lcd, 0, 0, LCD_W - 1, LCD_H - 1, RGB565(0, 0, 0));
+    lcd_bus_backlight(options->backlight);
     if (scene == APP_STRESS) {
-        stress_draw();
-    } else {
-        pattern_draw();
+        stress_draw(lcd);
+    } else if (scene == APP_PATTERN) {
+        pattern_draw(lcd);
+    } else if (scene == APP_ORIENT && options->madctl == ORIENT_ALL) {
+        orient_cycle(lcd);
+    } else if (scene == APP_ORIENT) {
+        orient_draw(lcd, (uint8_t)options->madctl);
+    } else if (scene == APP_ANIM) {
+        anim_draw(lcd, options->clock, options->report);
     }
 }

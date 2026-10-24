@@ -19,13 +19,19 @@
 #define GLASS_W 172u
 #define GLASS_H 320u
 
-/* What the glass shows at x, y, as 0xRRGGBB. */
+/*
+ * What the glass shows at x, y, as 0xRRGGBB, dimmed or dark where its round corners hide the pixel:
+ * what the memory held when the refresh last passed the row, at most a frame ago.
+ */
 uint32_t panel_shown(uint32_t x, uint32_t y);
 
 /* What the controller's memory holds at x, y of its 240 by 320, as 0xRRGGBB, and whether the glass shows it. */
 uint32_t panel_memory(uint32_t x, uint32_t y, int *on_glass);
 #define MEMORY_W 240u
 #define MEMORY_H 320u
+
+/* How many times the refresh has passed the glass's last row since the bus was set up. */
+uint64_t panel_refreshes(void);
 
 /* The errors the model met so far; each was written to stderr as it was met. */
 uint32_t panel_errors(void);
