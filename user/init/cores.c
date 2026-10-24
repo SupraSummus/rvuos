@@ -298,6 +298,7 @@ void cores_demo(uint32_t data_base, uint32_t data_size, uint32_t shared_base, ui
     rv_put_hex(BOOT_CAP_PRINT, cores);
     puts("\n");
     if (cores > 1) {
+        expect("a counter to spin on, loaded with no call", counter != 0 ? KERR_OK : KERR_INVALID_ARG);
         second_core(data_base, data_size, shared_base, counter, hz);
     }
 }

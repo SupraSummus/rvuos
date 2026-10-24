@@ -220,8 +220,8 @@ static uint32_t percentile(uint32_t n, uint32_t per_cent)
 static void report(const char *scenario, const char *member, const struct lab_stats *st)
 {
     uint64_t t;
-    uint32_t hz, counter;
-    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, &hz, &counter));
+    uint32_t hz;
+    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, &hz));
     uint32_t per_us = hz >= 1000000u ? hz / 1000000u : 1u;
     uint32_t n = __atomic_load_n(&st->n, __ATOMIC_ACQUIRE), kept = n < LAB_SAMPLES ? n : LAB_SAMPLES;
     memcpy(sorted, st->sample, kept * sizeof(sorted[0]));
@@ -236,8 +236,8 @@ static void report(const char *scenario, const char *member, const struct lab_st
 static uint32_t span_of(uint32_t us)
 {
     uint64_t t;
-    uint32_t hz, counter;
-    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, &hz, &counter));
+    uint32_t hz;
+    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, &hz));
     return rv_span(us * (hz >= 1000000u ? hz / 1000000u : 1u));
 }
 

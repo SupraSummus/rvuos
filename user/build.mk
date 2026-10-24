@@ -8,7 +8,7 @@ $(BUILD)/user/%.o: CFLAGS += $(USER_INC)
 # so the same scenarios run on every board, in the instructions of its architecture, user/arch/<arch>/escape.h;
 # those that try what one architecture alone has, a privileged register or the core's own stacking, are its alone.
 ESCAPE_PROGRAMS := escape-execute-data escape-jump-kernel escape-misaligned-load escape-misaligned-store \
-                   escape-store-kernel escape-store-clock escape-past-region
+                   escape-store-kernel escape-store-console escape-past-region
 ifeq ($(ARCH),riscv)
 ESCAPE_PROGRAMS += escape-csrr escape-mret
 else

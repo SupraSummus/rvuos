@@ -951,13 +951,11 @@ struct granted_range {
     uint32_t size;
     uint8_t rights;
 };
-/* The counter's block, read only, which OP_CLOCK_FRAME hands out. */
-#define GRANT_COUNTER 4
 /* The root task's code and input, which lie in its memory, or in flash outside RAM; see layout.h. */
-#define GRANT_CODE  5
-#define GRANT_INPUT 6
+#define GRANT_CODE  4
+#define GRANT_INPUT 5
 /* The board's devices follow, BOOT_DEVICES of them, in the order of their slots, and its further blocks of RAM. */
-#define GRANT_DEVICES 7
+#define GRANT_DEVICES 6
 #define GRANT_RAM_BLOCKS (GRANT_DEVICES + BOOT_DEVICES)
 #define GRANTED_RANGES (GRANT_RAM_BLOCKS + BOOT_RAM_BLOCKS)
 extern struct granted_range boot_granted[GRANTED_RANGES];

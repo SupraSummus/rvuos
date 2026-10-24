@@ -1248,8 +1248,7 @@ static void check_captable(const struct captable *table)
  * or an object built on the parent's range, a pool on a region, an Irq or a Route on the pool it was allocated through,
  * a Route's end on a frame,
  * a thread's process, a thread's watch or an Irq's notification on a capability to it,
- * a thread's units on the units it was bound through,
- * or the counter's block, or a region installed from it or a Route's end on it, below the clock.
+ * or a thread's units on the units it was bound through.
  */
 
 /* The node a link names, if one of a live object; only the pool the address lies in is looked at. */
@@ -1354,15 +1353,6 @@ static bool derived_from(const struct cap *c, const struct cap *p)
                (c->type == CAP_PRINT || c->type == CAP_HALT || c->type == CAP_TEST || c->type == CAP_CLOCK ||
                 cap_addr(c) == cap_addr(p)) &&
                (c->type != CAP_NOTIFICATION || !(notify_bits(c) & ~notify_bits(p)));
-    }
-    /*
-     * A clock that reads gives out one frame, the counter's block, read only,
-     * and adopts what was carved, installed or connected from it when a delete or a revoke takes it.
-     */
-    if (c->type == CAP_FRAME && p->type == CAP_CLOCK) {
-        const struct granted_range *g = &boot_granted[GRANT_COUNTER];
-        return (p->rights & RIGHT_R) && !(c->rights & ~g->rights) &&
-               range_within(block_base(c), block_size(c), g->base, g->size);
     }
     /* Below a pool's node, and below its capability, lies every capability to the pool's objects, which carry rights of their own. */
     if (p->type == CAP_POOL) {

@@ -494,18 +494,9 @@ Reading the time needs `RIGHT_R`, and feeding the watchdog `RIGHT_W` (`KERR_NO_R
 
 **`OP_CLOCK_READ` (25).**
 Returns the time, the counter's counts since boot, in `a1` (low word) and `a2` (high word),
-`a3` = the counter's rate in hertz, which does not change while the machine runs,
-and `a4` = the address of the counter's low 32 bits, which `OP_CLOCK_FRAME` shows.
+and `a3` = the counter's rate in hertz, which does not change while the machine runs.
 The time is 64 bits on every board, whatever the width of the board's counter.
 Under tracing it is the record's clock, which only `OP_TEST_TICK` moves, section 9.
-
-**`OP_CLOCK_FRAME` (26).**
-`a1` = destination slot in the caller's tables.
-Produces a frame, read only, the smallest block that holds the counter's low 32 bits,
-hanging below the invoked capability.
-Installed, it lets a thread read them with a load and no call;
-they wrap, after 71 minutes at a megahertz, so a program takes differences of them.
-On a PMP grain coarser than eight bytes the frame holds the registers beside them too.
 
 **`OP_CLOCK_WATCHDOG` (37).**
 `a1` = microseconds, more than zero and at most `WATCHDOG_US_MAX`, ten seconds (`KERR_INVALID_ARG`).
@@ -658,7 +649,7 @@ whether something outside the pool still holds its objects it does not tell.
 | 23 | `OP_CAP_REVOKE` | `CapTable` |
 | 24 | `OP_CAP_DERIVE` | `CapTable` |
 | 25 | `OP_CLOCK_READ` | `Clock` |
-| 26 | `OP_CLOCK_FRAME` | `Clock` |
+| 26 | none; it was `OP_CLOCK_FRAME` | |
 | 27 | none; it was `OP_UNTYPED_INFO` | |
 | 28 | `OP_TIME_CARVE` | `Time` |
 | 29 | `OP_TIME_BIND` | `Time` |
@@ -722,11 +713,11 @@ and drops into user mode with:
 | 18 | `BOOT_CAP_HALT` | `Halt` | all |
 | 19 | `BOOT_CAP_TEST` | `Test` | all |
 | 20 | `BOOT_CAP_ROUTES` | `RouteLine`: every channel of the board's router the kernel lends, section 5.13; empty where there is none | write |
-| 21 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's: read and write, but read only for the ESP32-C6's eFuse and read and execute for its window onto flash |
+| 21 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, the clock's counter on QEMU; section 3 | each the board's: read and write, but read only for an eFuse and a counter, and read and execute for a ROM and a window onto flash |
 | after them | `BOOT_CAP_RAM_BLOCKS` | `Untyped`s: one over each further block of RAM the board sets aside for the root task, in its order, none but on the ESP32-C6; section 3 | all |
 
 `BOOT_CAP_COUNT` is 21 plus `BOOT_DEVICES` plus `BOOT_RAM_BLOCKS`, the counts in the board's `devices.h`, which `rvuos.h` includes:
-21 on QEMU and the MPS2 boards, 26 on the nRF52840, 26 on RP2350 and 31 on the ESP32-C6.
+22 on QEMU and the MPS2 boards, 26 on the ESP32-C5, 27 on the nRF52840, 27 on RP2350 and 32 on the ESP32-C6.
 A root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 1.6 KiB of the boot pool,

@@ -22,7 +22,7 @@ On ARM the kernel needs an ARMv7-M or ARMv8-M Mainline core with:
 
 - an MPU with at least four regions, PMSAv7 on ARMv7-M or PMSAv8 on ARMv8-M,
 - SysTick and the NVIC, which every such core has,
-- a counter of the board's that a process can read as memory, for `BOOT_CAP_CLOCK`.
+- a counter of the board's the kernel reads as memory, for `BOOT_CAP_CLOCK`.
 
 On ARMv8-M the kernel and every program run in the Secure state,
 and no program reaches a coprocessor or the floating-point unit, whose instructions fault.
@@ -59,7 +59,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x0200BFF8` | 8 B | the CLINT's `mtime`, 10 MHz, read only through `BOOT_CAP_CLOCK` |
+| `0x0200BFE0` | 32 B | the CLINT's words that end with `mtime`, 10 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 21 |
 | `0x10000000` | 256 B | 16550 UART registers, granted to the root task |
 | `0x80000000` to `0x800FF000` | just under 1 MiB | kernel code, data and stack |
 | `0x800FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
@@ -80,6 +80,7 @@ Interrupt lines:
 | 0 | the kernel log (no controller behind it) |
 | 1 to 95 | the PLIC's sources; the UART is line 10 |
 
+`BOOT_CAP_COUNT` is 22 here and the root task's table has 68 slots.
 The kernel has no tick: the CLINT's compare is set for the first count that could change what runs.
 QEMU's PMP has sixteen entries and a four-byte grain.
 `BOOT_CAP_ROUTES` names four channels of a router that wires nothing, as on the MPS2 boards and the host,
@@ -96,7 +97,6 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x20001C08` | 8 B | the CLINT's `UTIME`, a read-only copy of `mtime` at the CPU clock, 160 MHz, through `BOOT_CAP_CLOCK` |
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
 | `0x42000000` | 1 MiB | the window onto flash, from `0x210000` in it, through the cache; see below |
 | `0x42840000` | 256 KiB | root task code, read and execute, from `0x40000` in flash |
@@ -134,12 +134,12 @@ Interrupt lines:
 | 1 to 77 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 49 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-and after them, in slot 30, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
-so `BOOT_CAP_COUNT` is 31 here and the root task's table has 77 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
+and after them, in slot 31, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
+so `BOOT_CAP_COUNT` is 32 here and the root task's table has 78 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
 They are the SAR ADC and the whole modem,
 where `make BOARD=esp32c6 phymap` and `make BOARD=esp32c6 wifi-esp32c6-map` find what ESP-IDF's PHY and Wi-Fi libraries reach,
 the eFuse's registers, the window onto flash, the ROM, the random number generator's data register,
-the IO MUX and the GPIO matrix, and HP_SYSTEM:
+the IO MUX and the GPIO matrix, HP_SYSTEM, and the clock's counter:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
@@ -152,6 +152,7 @@ the IO MUX and the GPIO matrix, and HP_SYSTEM:
 | 27 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
 | 28 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
 | 29 | `BOOT_CAP_HP_SYSTEM` | `0x60095000` | 4 KiB | HP_SYSTEM, whose `SRAM_USAGE` gives a 128 KiB bank of SRAM to the modem's dump engine | read, write |
+| 30 | `BOOT_CAP_COUNTER` | `0x20001C08` | 8 bytes | the CLINT's `UTIME`, a copy of `mtime` for user mode at the CPU clock, 160 MHz, the clock's counter | read |
 
 The modem's two MACs, Wi-Fi's from `0x600A4000` and 802.15.4's at `0x600A3000`, are bus masters, and nothing confines them:
 a program that holds the modem's frame reaches all RAM, the kernel's too,
@@ -208,13 +209,11 @@ the Wi-Fi system's root task routes none.
 The chip boots from flash as the ESP32-C6 does, through the same `tools/esp32c6-run.py`, given `--chip esp32c5`,
 and the root task's code runs from flash through the cache;
 its ROM looks for the kernel at `0x2000` in flash rather than at its start.
-The demo stops where it reads the counter's frame with a load, see below.
 
 Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x2000BFF8` | 8 B | the CLINT's `mtime` at the CPU clock, 160 MHz, through `BOOT_CAP_CLOCK`; user mode's loads there fault, see below |
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
 | `0x42840000` | 256 KiB | root task code, read and execute, from `0x40000` in flash |
 | `0x42880000` | 4 KiB | input region, read only, from `0x80000` in flash, where `tools/esp32c6-run.py --text` writes a configuration |
@@ -262,8 +261,8 @@ The compare is the CLINT's here too.
 The PMP has sixteen entries and a 128-byte grain, so the smallest frame a program maps is 128 bytes.
 Misaligned loads and stores go through in hardware.
 The core refuses user mode the CLINT, and holds no copy of `mtime` user mode may load,
-so a thread that installs the counter's frame and reads it faults; `OP_CLOCK_READ` gives the time as everywhere.
-`DESIGN.md`, open decision 41, holds what the frame becomes here.
+so no counter is listed among the devices, and a program reads the time through `OP_CLOCK_READ` alone;
+the demo skips what it times with loads of the counter.
 
 User mode can write some of the core's CSRs:
 `ustatus`, `utvec`, `utvt`, `uscratch`, `uepc`, `ucause`, `uintthresh`, one at `0x017` Espressif names nowhere,
@@ -286,7 +285,6 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x400B0028` | 8 B | TIMER0's `TIMERAWL`, 1 MHz, read only through `BOOT_CAP_CLOCK`; the word above it is not the high half |
 | `0x20000000` to `0x2001F000` | 124 KiB | kernel code, data and stack |
 | `0x2001F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
 | `0x20020000` | 128 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
@@ -306,7 +304,7 @@ Interrupt lines:
 | 26 | SIO's doorbell; on the Cortex-M33 with `CORES=2` the kernel's, for its cores, and an `Irq` cannot be bound to it |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots, and `BOOT_CAP_ROUTES` is empty, since it has no router;
+so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots, and `BOOT_CAP_ROUTES` is empty, since it has no router;
 the kernel takes each device out of reset at boot and opens it to user mode in ACCESSCTRL,
 and on the RISC-V cores opens every pin to Non-secure access, which is how user mode reaches the bus there:
 
@@ -315,8 +313,9 @@ and on the RISC-V cores opens every pin to Non-secure access, which is how user 
 | 21 | `BOOT_CAP_IO_BANK0` | `0x40028000` | 16 KiB | IO_BANK0, the pins' functions, overrides and interrupts | read, write |
 | 22 | `BOOT_CAP_PADS_BANK0` | `0x40038000` | 16 KiB | PADS_BANK0, the pins' pads | read, write |
 | 23 to 25 | `BOOT_CAP_PIO0` to `BOOT_CAP_PIO2` | `0x50200000`, `0x50300000`, `0x50400000` | 16 KiB each | PIO0, PIO1 and PIO2 | read, write |
+| 26 | `BOOT_CAP_COUNTER` | `0x400B0020` | 32 bytes | TIMER0's, `TIMERAWL` at 8 into them, 1 MHz, the clock's counter on either kind of core; the word below it is the high half | read |
 
-Each is a device's registers and their atomic aliases, and none is a bus master.
+Each but the counter's is a device's registers and their atomic aliases, and none is a bus master.
 The ADC is not listed: its clock is not running, and it never leaves reset without one.
 
 The kernel takes the USB controller out of reset at boot and opens it to user mode in ACCESSCTRL,
@@ -356,7 +355,6 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x40008544` | 4 B | TIMER0's `CC[1]`, 1 MHz, read only through `BOOT_CAP_CLOCK`; no word holds the high half |
 | `0x20000000` | 8 KiB | the console, granted to the root task |
 | `0x20002000` to `0x2000F000` | 52 KiB | kernel code, data and stack, the vector table first |
 | `0x2000F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
@@ -374,8 +372,8 @@ Interrupt lines:
 | 0 | the kernel log; POWER_CLOCK cannot be bound |
 | 1 to 47 | the peripherals' lines, numbered by their IDs; nothing raises the console's line, 20, SWI0 |
 
-The root task is granted a frame over GPIO, one over the radio and one over each of TIMER2, TIMER3 and TIMER4,
-from `BOOT_CAP_DEVICES` up, so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots:
+The root task is granted a frame over GPIO, one over the radio, one over each of TIMER2, TIMER3 and TIMER4,
+and one over the clock's counter, from `BOOT_CAP_DEVICES` up, so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
@@ -384,6 +382,7 @@ from `BOOT_CAP_DEVICES` up, so `BOOT_CAP_COUNT` is 26 here and the root task's t
 | 23 | `BOOT_CAP_TIMER2` | `0x4000A000` | 4 KiB | TIMER2, which times what is shorter than a kernel's step, such as 802.15.4's backoffs; its line is 10 | read, write |
 | 24 | `BOOT_CAP_TIMER3` | `0x4001A000` | 4 KiB | TIMER3, for routes, such as an acknowledgement's turnaround; its line is 26 | read, write |
 | 25 | `BOOT_CAP_TIMER4` | `0x4001B000` | 4 KiB | TIMER4, for routes, such as a count of the frames received; its line is 27 | read, write |
+| 26 | `BOOT_CAP_COUNTER` | `0x40008540` | 32 bytes | TIMER0's `CC` registers, `CC[1]` at 4 into them, 1 MHz, the clock's counter; no word holds the high half | read |
 
 The router is the PPI, and `BOOT_CAP_ROUTES` names its channels 1 to 19; channel 0 is the kernel's counter's, below.
 An end is the offset of a register in its device's 4 KiB block, as the product specification gives it:
@@ -413,7 +412,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x40028018` | 8 B | the FPGA's `COUNTER`, 25 MHz, read only through `BOOT_CAP_CLOCK`; the word above it is the prescaler, zero |
+| `0x40028000` | 32 B | the FPGA's first registers, `COUNTER` at `0x18` into them, 25 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 21 |
 | `0x40004000` | 4 KiB | UART0 of the CMSDK, granted to the root task |
 | `0x00000000` to `0x000FF000` | just under 1 MiB | kernel code, data and stack, the vector table first |
 | `0x000FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
@@ -448,7 +447,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x50302018` | 8 B | the FPGA's `COUNTER`, 20 MHz, read only through `BOOT_CAP_CLOCK`; the word above it is the prescaler, zero |
+| `0x50302000` | 32 B | the FPGA's first registers, `COUNTER` at `0x18` into them, 20 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 21 |
 | `0x50200000` | 4 KiB | UART0 of the CMSDK, granted to the root task |
 | `0x10000000` to `0x100FF000` | just under 1 MiB | kernel code, data and stack, the vector table first |
 | `0x100FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |

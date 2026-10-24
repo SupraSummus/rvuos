@@ -187,14 +187,13 @@ static void put_state(void)
 
 /*
  * What the machine fixes: the smallest region, the smallest pool, where a process's tables, a table's slots
- * and a thread's process lie, and the counter's block, its base, size and rights, which a clock gives out.
+ * and a thread's process lie.
  */
 static void put_machine(void)
 {
-    const struct granted_range *g = &boot_granted[GRANT_COUNTER];
-    put("machine %u %u %u %u %u %u %u %u\n", (unsigned)region_min_size(), (unsigned)POOL_MIN_SIZE,
+    put("machine %u %u %u %u %u\n", (unsigned)region_min_size(), (unsigned)POOL_MIN_SIZE,
         (unsigned)offsetof(struct process, tables), (unsigned)offsetof(struct captable, slots),
-        (unsigned)offsetof(struct thread, proc), (unsigned)g->base, (unsigned)g->size, (unsigned)g->rights);
+        (unsigned)offsetof(struct thread, proc));
 }
 
 void model_begin(bool call)

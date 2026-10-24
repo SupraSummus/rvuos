@@ -66,7 +66,7 @@
 #define CAP_UNTYPED  8 /* memory that may become a frame, a pool or two halves; never mapped */
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
-#define CAP_CLOCK    11 /* the machine's time, the counter's frame, and its watchdog */
+#define CAP_CLOCK    11 /* the machine's time and its watchdog */
 #define CAP_TIME     12 /* a range of the processor's units of time; no kernel object behind it */
 #define CAP_HALT     13 /* halting the machine */
 #define CAP_TEST     14 /* driving the machine as a test does: tracing, moving the clock, interrupting, preempting */
@@ -566,21 +566,14 @@
 
 /*
  * Clock (RIGHT_R): read the machine's time, 64 bits counting up from boot at a fixed rate.
- * Returns a1 = the low word, a2 = the high word, a3 = the rate in Hz, measured at boot on the ESP32-C6,
- * and a4 = the address of the counter's low 32 bits, which OP_CLOCK_FRAME shows.
+ * Returns a1 = the low word, a2 = the high word, a3 = the rate in Hz, measured at boot on the ESP32 boards.
+ * A board whose counter user mode can load lists it among its devices, BOOT_CAP_COUNTER,
+ * and a program loads its low 32 bits COUNTER_OFFSET into that frame with no call, at the same rate;
+ * they wrap, so it takes differences of them. Both come from the board's devices.h; see DESIGN.md, decision 41.
  * Under tracing the time is the record's, which only OP_TEST_TICK moves; see DESIGN.md, "Verification".
  * The rate and the default span are OP_CAP_INFO's too, which needs no right.
  */
 #define OP_CLOCK_READ 25
-/*
- * Clock (RIGHT_R): derive a read-only frame holding the counter's low 32 bits, a child of the clock.
- * a1 = destination slot.
- * Installed, it lets a process read them with a load and no call.
- * They wrap, after 71 minutes at a megahertz, so a program takes differences of them;
- * the whole time is OP_CLOCK_READ's, since where the rest of the counter lies, if anywhere, is the board's.
- * It is the smallest block holding the word, so a coarse PMP grain shows its neighbours too.
- */
-#define OP_CLOCK_FRAME 26
 /*
  * Clock (RIGHT_W): the watchdog. a1 = microseconds, more than zero and at most WATCHDOG_US_MAX,
  * else KERR_INVALID_ARG.
@@ -744,7 +737,8 @@
 
 /*
  * One above the highest operation code; the fuzzer's mutator draws below it.
- * Codes 11 and 27 are no operation's: they were OP_FRAME_INFO and OP_UNTYPED_INFO, which OP_CAP_INFO replaced.
+ * Codes 11, 26 and 27 are no operation's: 11 and 27 were OP_FRAME_INFO and OP_UNTYPED_INFO, which OP_CAP_INFO replaced,
+ * and 26 OP_CLOCK_FRAME, the counter's frame, which a board grants as a device instead; see DESIGN.md, decision 41.
  */
 #define OP_COUNT 48
 
@@ -789,7 +783,7 @@
 #define BOOT_CAP_ROUTES    20
 /*
  * Frames over the devices the board lists, BOOT_DEVICES of them, from this slot up in the board's order;
- * QEMU's lists none.
+ * QEMU's lists one, its counter.
  * BOOT_DEVICES comes from the kernel's board.h, or a program's devices.h, which names each slot.
  */
 #define BOOT_CAP_DEVICES   21
@@ -799,7 +793,7 @@
  * BOOT_RAM_BLOCKS comes from the kernel's board.h, or a program's devices.h, as BOOT_DEVICES does.
  */
 #define BOOT_CAP_RAM_BLOCKS (BOOT_CAP_DEVICES + BOOT_DEVICES)
-/* The root task's own slots start here; on QEMU it is 21. */
+/* The root task's own slots start here; on QEMU it is 22. */
 #define BOOT_CAP_COUNT     (BOOT_CAP_RAM_BLOCKS + BOOT_RAM_BLOCKS)
 
 /*
@@ -862,7 +856,7 @@ struct replay_record {
 /* The most region slots a process has on any machine; OP_CAP_INFO on a process tells this machine's. */
 #define PROCESS_REGION_SLOTS_MAX 16
 #define PROCESS_TABLES 2 /* table slots per process, see SLOT_TABLE_SHIFT */
-#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 67 on QEMU */
+#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 68 on QEMU */
 /* Region slots of the root task's process, or the most a process may have where that is fewer; see OP_CAP_INFO. */
 #define ROOT_REGION_SLOTS 8
 #define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */

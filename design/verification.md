@@ -79,7 +79,6 @@ a pool's own node on an Untyped, an installed region or a `Route`'s end on a fra
 a thread's units on a capability to units that holds them, the first of them even for none,
 a thread's process or watch or an `Irq`'s notification on a capability to that object,
 the watch and the `Irq` with no more bits to signal, or on that object's pool or its pool's own node,
-the counter's block, or a region installed from it or a `Route`'s end on it, below a clock with the right to read,
 or a capability to a pool or an object below a capability to that pool or its own node.
 A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
 since every step of theirs does; see "Bounded work".
@@ -217,8 +216,7 @@ and a table mounted in a process only in one the caller held a capability to wit
 Or it names an object the call built,
 in a pool the caller could allocate from,
 bound to what the caller could write,
-and a pool on memory the caller held an Untyped to, with read and write,
-and a clock with the right to read covers the counter's frame, read only.
+and a pool on memory the caller held an Untyped to, with read and write.
 So a thread earns units only through a capability to them with `RIGHT_W`,
 and runs on spare time only through one with `RIGHT_X` besides.
 This is goal 2 across a call.

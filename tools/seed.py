@@ -32,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HEADERS = [ROOT / "include/rvuos/abi.h", ROOT / "include/rvuos/replay.h"]
 OPS_H = ROOT / "host/ops.h"
+QEMU_BOARD_H = ROOT / "kernel/board/qemu/board.h"
 DEFINE = re.compile(r"^#define\s+([A-Z_][A-Z0-9_]*)\s+(.+?)\s*(?:/\*.*)?$")
 TERM = re.compile(r"^(0x[0-9a-fA-F]+|[0-9]+)u?$")
 SLOT_IN = re.compile(r"^SLOT_IN\s*\(([^,]+),([^)]+)\)$")
@@ -41,9 +42,13 @@ RECORD = struct.Struct("<BBHIIIIII")
 def defines():
     """
     Every object-like #define of the two headers, by name, as its text,
-    and BOOT_DEVICES and BOOT_RAM_BLOCKS, which a board's devices.h gives: none, since the seeds are QEMU's.
+    and BOOT_DEVICES and BOOT_RAM_BLOCKS, which a board's board.h gives: QEMU's, since the seeds are QEMU's.
     """
-    found = {"BOOT_DEVICES": "0", "BOOT_RAM_BLOCKS": "0"}
+    found = {}
+    for line in QEMU_BOARD_H.read_text().splitlines():
+        m = DEFINE.match(line)
+        if m and m.group(1) in ("BOOT_DEVICES", "BOOT_RAM_BLOCKS"):
+            found[m.group(1)] = m.group(2)
     for header in HEADERS:
         for line in header.read_text().splitlines():
             m = DEFINE.match(line)
@@ -132,11 +137,11 @@ class Namer:
     def __init__(self, names):
         num = {n: value(t, names) for n, t in names.items() if TERM.match(t.strip()) or n.startswith(("BOOT_CAP_", "REPLAY_CAP_"))}
         self.shift = num["SLOT_TABLE_SHIFT"]
-        # The replay's names first, since BOOT_CAP_DEVICES and BOOT_CAP_COUNT are where its slots begin.
+        # The replay's names first, since BOOT_CAP_COUNT is where its slots begin.
         self.slots = {}
         for prefix in ("REPLAY_CAP_", "BOOT_CAP_"):
             for n, v in num.items():
-                if n.startswith(prefix) and n not in ("BOOT_CAP_COUNT", "BOOT_CAP_NULL", "BOOT_CAP_DEVICES"):
+                if n.startswith(prefix) and n not in ("BOOT_CAP_COUNT", "BOOT_CAP_NULL", "BOOT_CAP_RAM_BLOCKS"):
                     self.slots.setdefault(v, n)
         self.types = {v: n for n, v in num.items()
                       if n.startswith("CAP_") and n != "CAP_NONE" and re.fullmatch(r"CAP_[A-Z_]+", n)}

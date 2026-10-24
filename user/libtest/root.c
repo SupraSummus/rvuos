@@ -450,8 +450,8 @@ static void lock_round(int named)
 static uint64_t now(uint32_t *per_us)
 {
     uint64_t counts;
-    uint32_t hz, counter;
-    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &counts, &hz, &counter));
+    uint32_t hz;
+    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &counts, &hz));
     *per_us = hz / 1000000u;
     return counts;
 }

@@ -69,7 +69,7 @@ def invariants : List Invariant :=
   [⟨"forest", fun _ => State.wellFormed, none⟩,
    ⟨"derivation", fun _ => State.derivedOk, none⟩,
    ⟨"nesting", fun _ => State.nestingOk, none⟩,
-   ⟨"parents", State.parentsOk, none⟩]
+   ⟨"parents", fun _ => State.parentsOk, none⟩]
 
 /-- What a step left: the caller's registers, or what stood in for them. -/
 inductive Seen where
@@ -130,11 +130,11 @@ def broken (m : Machine) (s : State) : List Invariant := invariants.filter (!·.
 
 /-- The machine's line, its smallest region two bytes or more, as `step_parented` takes it. -/
 def readMachine (r : Reader) : IO Machine := do
-  let [rmin, pmin, pto, tso, tpo, cb, cz, cr] ← nats (← expect r "machine")
-    | throw (IO.userError "model-check: machine takes eight words")
+  let [rmin, pmin, pto, tso, tpo] ← nats (← expect r "machine")
+    | throw (IO.userError "model-check: machine takes five words")
   if rmin < 2 then
     throw (IO.userError s!"model-check: line {← r.line.get}: a smallest region of {rmin} bytes, which the proofs do not cover")
-  pure ⟨rmin, pmin, pto, tso, tpo, cb, cz, cr⟩
+  pure ⟨rmin, pmin, pto, tso, tpo⟩
 
 /-- A state the records of an input began in: the driver's threads that may run, by actor number, and the tree. -/
 structure Start where

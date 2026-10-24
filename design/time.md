@@ -106,16 +106,15 @@ The rate is the board's, and on the ESP32-C6 measured at boot, so a program take
 The clock's description, `OP_CAP_INFO`, tells the rate and the default span without `RIGHT_R`,
 since neither is the time: a program that may not read the time may still know the grain its timers and requests come in.
 
-**And the counter's frame, for a reader that cannot trap.**
+**And the counter as a device, for a reader that cannot trap.**
 A call is a trap, which a program that measures what the kernel does to it cannot afford:
 a thread spinning to see whether the timer or another core takes the processor would trap at every read.
-So `OP_CLOCK_FRAME` derives a read-only `Frame` over the counter's low 32 bits, below the clock,
-and a process with that region installed reads them with a load.
+Where the core lets user mode load the counter, the board lists it among its devices, read only, `BOOT_CAP_COUNTER`,
+and a process with that region installed reads its low 32 bits with a load; see "Boards".
 They wrap, and the rest of the counter lies where the board has it, the word below on RP2350 and nowhere on the MPS2 boards,
 so the frame gives differences and the call the time.
-The frame is the smallest block holding the word;
-on a PMP grain coarser than eight bytes it also shows the timer registers beside it, read only.
-A board whose counter cannot be shown so, or whose neighbours a read would change, would refuse the frame; none does yet.
+Whether a board can show its counter so, and what lies beside it, is the board's alone,
+so the kernel has no call for it; the ESP32-C5's core refuses user mode its counter, and lists none; decision 41.
 
 **Why a capability.**
 The time is authority, and goal 2 allows no ambient authority:

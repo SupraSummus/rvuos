@@ -131,8 +131,8 @@ void drv_main(struct child_page *page)
      */
     __asm__ volatile("csrw 0x800, %0\n\tcsrw 0x801, %0" : : "r"(1));
     uint64_t now;
-    uint32_t hz, counter;
-    rv_clock_read(d->clock, &now, &hz, &counter);
+    uint32_t hz;
+    rv_clock_read(d->clock, &now, &hz);
     ets_update_cpu_frequency(hz / 1000000u);
     memcpy(drv_data_start, drv_data_load, (size_t)(drv_data_end - drv_data_start));
     memset(drv_bss_start, 0, (size_t)(drv_bss_end - drv_bss_start));

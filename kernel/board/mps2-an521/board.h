@@ -49,7 +49,7 @@
 #define UART_SIZE U32(0x1000)
 
 /*
- * The counter BOOT_CAP_CLOCK names: the FPGA's COUNTER, 32 bits counting up at the 20 MHz system clock.
+ * The counter under the clock: the FPGA's COUNTER, 32 bits counting up at the 20 MHz system clock.
  * The word above it is the prescaler, which the kernel leaves at zero, so the high word reads zero
  * and the counter wraps every 214 seconds; the kernel counts the wraps for itself, see timer.c.
  */
@@ -75,11 +75,12 @@
 #define IPI_LINE     6
 
 /*
- * The devices the boot grants as frames from BOOT_CAP_DEVICES up: none.
- * The board's devices are the kernel's or the console.
+ * The devices the boot grants as frames from BOOT_CAP_DEVICES up:
+ * the FPGA's first 32 bytes, read only, which hold the counter at 0x18, for a program to read with no call.
+ * The board's other devices are the kernel's or the console.
  */
-#define BOOT_DEVICES 0
-#define DEVICE_RANGE_LIST
+#define BOOT_DEVICES 1
+#define DEVICE_RANGE_LIST { FPGAIO_BASE, U32(0x20), RIGHT_R },
 
 /* No further blocks of RAM beside the free RAM, which the ESP32-C6 has; see boot.c. */
 #define BOOT_RAM_BLOCKS 0

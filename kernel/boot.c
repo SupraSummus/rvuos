@@ -68,10 +68,6 @@ struct thread *boot_create_root(void)
     /* The root task's code and input, granted wherever they lie, in its memory or in flash. */
     boot_granted[GRANT_CODE] = (struct granted_range){ USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X };
     boot_granted[GRANT_INPUT] = (struct granted_range){ INPUT_BASE, INPUT_SIZE, RIGHT_R };
-    /* The counter's low word, read only, in the smallest block that holds it; see OP_CLOCK_FRAME. */
-    uint32_t counter_size = region_min_size();
-    boot_granted[GRANT_COUNTER] =
-        (struct granted_range){ COUNTER_ADDR & ~(counter_size - 1), counter_size, RIGHT_R };
     /* The board's devices, each a frame from BOOT_CAP_DEVICES up; the array is never empty. */
     static const struct granted_range devices[BOOT_DEVICES + 1] = { DEVICE_RANGE_LIST };
     for (unsigned i = GRANT_DEVICES; i < GRANT_RAM_BLOCKS; i++) {

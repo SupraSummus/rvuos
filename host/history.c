@@ -387,7 +387,6 @@ static uint8_t rights_needed(uint32_t op)
     case OP_NOTIFY_WAIT:
     case OP_NOTIFY_LEND:
     case OP_CLOCK_READ:
-    case OP_CLOCK_FRAME:
     case OP_THREAD_OVERRUNS:
         return RIGHT_R;
     case OP_FRAME_CARVE:
@@ -1173,11 +1172,6 @@ void history_begin(bool call)
                 continue;
             }
             PUSH(held, grant_of(c));
-            /* A clock that reads holds the counter's frame, which OP_CLOCK_FRAME hands out. */
-            if (c->type == CAP_CLOCK && (c->rights & RIGHT_R)) {
-                const struct granted_range *r = &boot_granted[GRANT_COUNTER];
-                PUSH(held, ((struct grant){ CAP_FRAME, r->rights, r->base, r->size }));
-            }
         }
     }
     caller_dying = caller != NULL ? dying_under(caller, caller_process, caller_tables) : 0;

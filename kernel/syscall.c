@@ -185,10 +185,10 @@ static uint64_t delay_deadline(uint32_t us)
 }
 
 /*
- * Reading the time and the counter's frame takes RIGHT_R, and the watchdog, which halts the machine, RIGHT_W; see op_shapes.
+ * Reading the time takes RIGHT_R, and the watchdog, which halts the machine, RIGHT_W; see op_shapes.
  * arg[1..] carry the arguments in and the results out.
  */
-static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
+static int op_clock(uint32_t op, uint32_t *arg)
 {
     switch (op) {
     case OP_CLOCK_READ: {
@@ -196,13 +196,7 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
         arg[1] = (uint32_t)now;
         arg[2] = (uint32_t)(now >> 32);
         arg[3] = timer_counter_hz();
-        arg[4] = COUNTER_ADDR;
         return KERR_OK;
-    }
-    case OP_CLOCK_FRAME: {
-        const struct granted_range *g = &boot_granted[GRANT_COUNTER];
-        struct cap r = cap_to_frame(g->base, g->size, g->rights);
-        return slot_store(t, arg[1], &r, slot_node(t, slot));
     }
     case OP_CLOCK_WATCHDOG: {
         uint32_t us = arg[1];
@@ -1192,7 +1186,6 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_IRQ_BIND] = { CAP_IRQ_LINE, RIGHT_W, SHAPE_A123 },
     [OP_IRQ_SET] = { CAP_IRQ, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
     [OP_CLOCK_READ] = { CAP_CLOCK, RIGHT_R, 0 },
-    [OP_CLOCK_FRAME] = { CAP_CLOCK, RIGHT_R, SHAPE_A1 },
     [OP_CLOCK_WATCHDOG] = { CAP_CLOCK, RIGHT_W, SHAPE_A1 },
     [OP_TIME_CARVE] = { CAP_TIME, 0, SHAPE_A123 },
     [OP_TIME_BIND] = { CAP_TIME, RIGHT_W, SHAPE_A123 },
@@ -1287,7 +1280,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = op_untyped(t, slot, &cap, op, arg);
         break;
     case CAP_CLOCK:
-        err = op_clock(t, slot, op, arg);
+        err = op_clock(op, arg);
         break;
     case CAP_CAPTABLE:
         err = op_captable(t, slot, &cap, op, arg);

@@ -92,8 +92,7 @@ static void must(const char *what, uint32_t status)
 static uint64_t now(uint32_t *hz)
 {
     uint64_t t;
-    uint32_t counter;
-    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, hz, &counter));
+    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, hz));
     return t;
 }
 

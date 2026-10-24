@@ -47,7 +47,7 @@ bool timer_trap_enter(bool pending);
 void timer_trap_fired(void);
 void timer_trap_leave(bool traced);
 
-/* The rate of the counter, COUNTER_ADDR, in Hz; see OP_CLOCK_READ. */
+/* The rate of the counter in Hz; see OP_CLOCK_READ. */
 uint32_t timer_counter_hz(void);
 
 /*

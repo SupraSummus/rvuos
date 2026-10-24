@@ -609,7 +609,7 @@ until the maintainer decides otherwise.
       would keep `KERR_WRONG_TYPE` and say which calls the ABI promises;
       the describing calls, 41 and 42, came last, and every type takes the first.
     - **Where a new capability goes.**
-      `a1` for `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CLOCK_FRAME` and `OP_UNTYPED_SPLIT`,
+      `a1` for `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE` and `OP_UNTYPED_SPLIT`,
       `a2` for `OP_UNTYPED_RETYPE`, `OP_POOL_ALLOC` and `OP_NOTIFY_CARVE`,
       and `a3` for the other carves and `OP_IRQ_BIND`; one place would do.
     - **The errors.**
@@ -942,23 +942,22 @@ until the maintainer decides otherwise.
     on the ESP32-C6, once the root task's code moved to flash, the free RAM's half and a quarter below it.
     The board says which blocks, as it says which devices, and the boot checks that each lies in RAM
     apart from the kernel, its log, the root task's memory, the free RAM and the blocks before it.
-    QEMU lists none, so its table, the seeds and the corpus stay as they were, as with the devices, decision 25.
+    QEMU lists none, so its table, the seeds and the corpus stay as they were.
     A block is a root of its own, as the free RAM is, so no operation joins it to another:
     `lib/mem.c` joins a block's halves back into the block, each block on its own.
     Before, the free RAM was one block, and the rest lay unused.
 
-41. **The counter's frame where user mode may load no counter.**
-    `OP_CLOCK_FRAME` promises a read-only frame over the counter's low word, read with a load and no call.
+41. **A counter user mode loads is a device, not the clock's.**
+    Decided: the kernel has no call that shows the counter; `OP_CLOCK_READ` gives the time on every board,
+    and a board whose core lets user mode load its counter lists it among its devices, read only, `BOOT_CAP_COUNTER`.
+    `OP_CLOCK_FRAME` derived a read-only frame over the counter's low word from the clock,
+    which promised every board a counter user mode could load.
     The ESP32-C5's core refuses user mode the CLINT, whose loads fault, and has no copy of `mtime` at another address;
-    of its CPU's own space only the machine CLINT and the CLIC answer, and the peripherals' counters are read by latching them first.
-    What it has is the `time` CSR, which reads `mtime`, and which user mode reads with `rdtime` once `mcounteren.TM` is set,
-    as measured on the chip; `rdtime` is one instruction, cheaper than a load from a device.
-    Working default: none. The boot grants the frame over `mtime` as everywhere, and a thread that installs and reads it faults,
-    so the demo stops there; `OP_CLOCK_READ` gives the time on every board.
-    The ways open:
-    on such a board the frame's install sets `mcounteren.TM` for the process that holds it, a CSR the kernel switches with the process,
-    and `rv_counter_low` reads `time` where the board says so, which keeps the capability and changes what a program executes;
-    or the kernel lets the faulting load through, since the core delivers the value before it reports the fault late,
-    which costs a trap a read and rests on a behaviour Espressif documents nowhere;
-    or `OP_CLOCK_FRAME` refuses on this board, and a program asks the kernel each time.
-    Decide with the maintainer.
+    what it has is the `time` CSR, which user mode reads with `rdtime` once `mcounteren.TM` is set.
+    Whether and how a counter can be shown, and what lies beside it, is the board's,
+    so the frame was a board's device behind a kernel call; the call went, and the C5 lists none.
+    A program that times with no call what the kernel does to it, as the demo's tickless and request checks do,
+    runs those parts only where the board lists a counter.
+    Rejected: `mcounteren.TM` switched with the process that holds a capability for it, a CSR and a case for one board;
+    letting the C5's faulting load through, since the core delivers the value before it reports the fault,
+    a trap a read on a behaviour Espressif documents nowhere.

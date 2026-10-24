@@ -91,7 +91,7 @@ The tree grows in these ways:
 | `OP_CAP_DERIVE` | below the source |
 | `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
 | `OP_CAP_MOVE` | where the source hung, which it leaves empty, with what hung below the source below it |
-| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_ROUTE_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
+| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_ROUTE_CARVE` | below the invoked capability |
 | `OP_UNTYPED_RETYPE` of a frame, `OP_UNTYPED_SPLIT` | below the invoked Untyped |
 | `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
 | `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
@@ -539,24 +539,28 @@ With `RIGHT_R`, `OP_CLOCK_READ` returns the time and the counter's rate in hertz
 
 ```c
 uint64_t start, end;
-uint32_t hz, counter;
-rv_clock_read(CLOCK, &start, &hz, &counter);
+uint32_t hz;
+rv_clock_read(CLOCK, &start, &hz);
 work();
-rv_clock_read(CLOCK, &end, &hz, &counter);   /* (end - start) / hz seconds */
+rv_clock_read(CLOCK, &end, &hz);   /* (end - start) / hz seconds */
 ```
 
 A thread that cannot afford a call for each read, one that measures what the kernel does to it,
-reads the counter's low 32 bits with a load instead,
-through a read-only frame `OP_CLOCK_FRAME` derives, installed like any frame at the address the read returned.
-They wrap, after 71 minutes at a megahertz, so it takes differences of them:
+reads the counter with a load instead, where the board lets user mode load one:
+the board then lists it among its devices, read only, as `BOOT_CAP_COUNTER`, section 3,
+and the program installs that frame like any other.
+Its low 32 bits lie `COUNTER_OFFSET` into the frame, at the clock's rate,
+and wrap, after 71 minutes at a megahertz, so it takes differences of them:
 
 ```c
-rv_invoke(OP_CLOCK_FRAME, CLOCK, COUNTER_FRAME, 0, 0);
-rv_invoke(OP_PROCESS_INSTALL, PROCESS, 5, COUNTER_FRAME, RIGHT_R);
+uint32_t base, size;
+rv_frame_info(BOOT_CAP_COUNTER, &base, &size);
+rv_invoke(OP_PROCESS_INSTALL, PROCESS, 5, BOOT_CAP_COUNTER, RIGHT_R);
+const volatile uint32_t *low = (const volatile uint32_t *)(base + COUNTER_OFFSET);
 
-uint32_t at = rv_counter_low(counter);
+uint32_t at = *low;
 spin();
-uint32_t counts = rv_counter_low(counter) - at;
+uint32_t counts = *low - at;
 ```
 
 The rate is the board's, 10 MHz on QEMU, the CPU clock on the ESP32-C6 and 1 MHz on RP2350,
@@ -565,7 +569,6 @@ so a program takes it from `OP_CLOCK_READ`.
 and the default span, in counts of the counter, the longest power of two within a millisecond:
 how soon a request is due that no wait or bind gave a span for, which a program's own timing analysis works in, section 5.11.
 The time is the machine's, not the thread's: it includes other threads' slices.
-Revoking below a `Clock` capability uninstalls every region derived through it.
 `rdtime` traps on every board.
 The ESP32-C6's performance counter is no clock: it is the process's, and stops whenever another process runs, section 3.
 

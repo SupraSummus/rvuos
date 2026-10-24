@@ -282,8 +282,7 @@ __attribute__((noinline)) static void dc_stream(uint32_t n)
 static uint64_t dc_counts(struct drv *d, uint32_t *hz)
 {
     uint64_t now;
-    uint32_t counter;
-    rv_clock_read(d->clock, &now, hz, &counter);
+    rv_clock_read(d->clock, &now, hz);
     return now;
 }
 

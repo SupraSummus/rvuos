@@ -207,12 +207,6 @@ static inline uint32_t rv_irq_bind(uint32_t line_cap, uint32_t pool_cap, uint32_
     return rv_invoke(OP_IRQ_BIND, line_cap, pool_cap, ntfn_cap, dst);
 }
 
-/* OP_CLOCK_FRAME: a read-only frame over the counter, in slot dst. */
-static inline uint32_t rv_clock_frame(uint32_t clock_cap, uint32_t dst)
-{
-    return rv_invoke(OP_CLOCK_FRAME, clock_cap, dst, 0, 0);
-}
-
 /* OP_TIME_CARVE: a smaller range of units, count from offset, in slot dst. */
 static inline uint32_t rv_time_carve(uint32_t time_cap, uint32_t offset, uint32_t count, uint32_t dst)
 {
@@ -492,22 +486,20 @@ static inline uint32_t rv_irq_set(uint32_t irq_cap, uint32_t bits)
     return rv_invoke(OP_IRQ_SET, irq_cap, bits, 0, 0);
 }
 
-/* OP_CLOCK_READ: the time in counts since boot, the counter's rate in Hz, and the address of its low word. */
-static inline uint32_t rv_clock_read(uint32_t clock_cap, uint64_t *now, uint32_t *hz, uint32_t *counter)
+/* OP_CLOCK_READ: the time in counts since boot, and the counter's rate in Hz. */
+static inline uint32_t rv_clock_read(uint32_t clock_cap, uint64_t *now, uint32_t *hz)
 {
     register uint32_t r_a0 __asm__(RV_A0) = clock_cap;
     register uint32_t r_a1 __asm__(RV_A1) = 0;
     register uint32_t r_a2 __asm__(RV_A2) = 0;
     register uint32_t r_a3 __asm__(RV_A3) = 0;
-    register uint32_t r_a4 __asm__(RV_A4);
     register uint32_t r_a7 __asm__(RV_A7) = OP_CLOCK_READ;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3), "=r"(r_a4)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7)
-                     : "memory", RV_A5, RV_A6);
+                     : "memory", RV_A4, RV_A5, RV_A6);
     *now = ((uint64_t)r_a2 << 32) | r_a1;
     *hz = r_a3;
-    *counter = r_a4;
     return r_a0;
 }
 
@@ -515,15 +507,6 @@ static inline uint32_t rv_clock_read(uint32_t clock_cap, uint64_t *now, uint32_t
 static inline uint32_t rv_clock_watchdog(uint32_t clock_cap, uint32_t us)
 {
     return rv_invoke(OP_CLOCK_WATCHDOG, clock_cap, us, 0, 0);
-}
-
-/*
- * The counter's low 32 bits, from the address OP_CLOCK_READ gave, in a frame OP_CLOCK_FRAME gave:
- * a load and no system call. They wrap, so a program takes differences of them.
- */
-static inline uint32_t rv_counter_low(uint32_t counter)
-{
-    return *(const volatile uint32_t *)counter;
 }
 
 /* OP_PRINT: the first n bytes of s, PRINT_BYTES at most, into the kernel's log; a zero byte ends them. */

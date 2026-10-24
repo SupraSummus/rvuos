@@ -65,7 +65,7 @@ $(foreach h,$(HOST_HARNESSES),$(eval $(call host_harness,$(h))))
 host-harnesses: $(HOST_HARNESSES)
 
 # The records of every seed, the directory written anew, so that a seed removed leaves nothing behind.
-$(SEEDS): tests/seeds $(wildcard tests/seeds/*) tools/seed.py include/rvuos/abi.h include/rvuos/replay.h host/ops.h
+$(SEEDS): tests/seeds $(wildcard tests/seeds/*) tools/seed.py include/rvuos/abi.h include/rvuos/replay.h host/ops.h kernel/board/qemu/board.h
 	tools/seed.py --build tests/seeds $@
 
 # Replay the seeds and the corpus once on every harness, self-check after every call.

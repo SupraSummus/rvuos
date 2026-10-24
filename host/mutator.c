@@ -73,11 +73,11 @@ static uint8_t draw_op(struct rng *r)
 /*
  * An address for a load or a store: mostly in the free RAM the records make frames of,
  * at a block's edge, where a region begins or ends, or a word into it;
- * now and then in the root task's memory, the kernel's, or the clock's.
+ * now and then in the root task's memory, the kernel's, or the counter's, a device the root task holds.
  */
 static uint32_t draw_address(struct rng *r)
 {
-    static const uint32_t elsewhere[] = { RAM_BASE, BOOT_POOL_BASE, INPUT_BASE, COUNTER_ADDR };
+    static const uint32_t elsewhere[] = { RAM_BASE, BOOT_POOL_BASE, INPUT_BASE, CLINT_MTIME };
     if (below(r, 8) == 0) {
         return elsewhere[below(r, sizeof(elsewhere) / sizeof(elsewhere[0]))] + (uint32_t)below(r, 16) * 4;
     }
@@ -376,6 +376,9 @@ static const struct shadow *shadow_start(void)
     memset(start.type, CAP_NONE, sizeof(start.type));
     memset(start.names, NOWHERE, sizeof(start.names));
     memcpy(start.type[0], boot, sizeof(boot));
+    for (size_t i = BOOT_CAP_DEVICES; i < BOOT_CAP_RAM_BLOCKS; i++) {
+        start.type[0][i] = CAP_FRAME;
+    }
     start.names[0][BOOT_CAP_CAPTABLE] = 0;
     for (size_t i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
         follow(&start, &replay_prologue[i]);

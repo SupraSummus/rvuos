@@ -28,7 +28,6 @@
 #define CLINT_TIMECTL  (CLINT_BASE + 0x4010u)
 _Static_assert(CLINT_MTIME == CLINT_BASE + 0xBFF8u && CLINT_MTIMECMP == CLINT_BASE + 0x4000u,
                "board.h names this CLINT's registers");
-_Static_assert(CLINT_MTIME == COUNTER_ADDR, "the clock names the counter the timer compares with");
 #define TIMECTL_COUNTER_EN (1u << 0)
 
 /* The system timer's unit 0, which counts from reset. */

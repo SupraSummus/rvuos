@@ -151,13 +151,13 @@ its interrupt enabled in the CLIC rather than in `mie`.
 RP2350's is the RISC-V platform timer in the Secure bank of SIO,
 counting the microseconds a tick generator divides from the crystal.
 
-A process reads the counter through a read-only region at `COUNTER_ADDR`, not with `rdtime`:
+A process loads the counter, where it may, through a read-only device frame, `BOOT_CAP_COUNTER`, not with `rdtime`:
 the ESP32-C6 has no `time` CSR, but its CLINT has `UTIME`, a read-only copy of `mtime` for user mode.
 On QEMU the kernel clears `mcounteren` at boot, so `rdtime` traps on every board; see "Time".
 The ESP32-C5 has `time`, which reads `mtime` and which user mode reads once `mcounteren.TM` is set,
-but no copy of `mtime` user mode may load, so its counter's frame faults when read; open decision 41.
-User mode does not reach RP2350's SIO timer, so there the counter is TIMER0's, counting the same microseconds;
-TIMER0 keeps its high half below its low one, so the word above the counter is not its high half; see `TODO.md`.
+but no copy of `mtime` user mode may load, so it lists no counter; decision 41.
+User mode does not reach RP2350's SIO timer, so there the counter it loads is TIMER0's, counting the same microseconds;
+TIMER0 keeps its high half below its low one, so the word above the counter is not its high half.
 
 ### Interrupt controller
 

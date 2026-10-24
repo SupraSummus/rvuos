@@ -2,9 +2,9 @@ Describing takes RIGHT_W, as changing an object does,
 so a capability with fewer rights cannot describe itself;
 a describing call succeeds on any filled slot whatever its rights.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a describing call failed on a filled slot
-Witness: fuzz clock-region-reads-only
+Witness: fuzz describe-every-type
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

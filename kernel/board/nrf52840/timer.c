@@ -4,8 +4,7 @@
  * A TIMER keeps its count to itself; a CAPTURE task copies it into a CC register, which is all a read sees.
  * So TIMER1 raises its COMPARE[0] event every microsecond, clearing itself at each,
  * and PPI channel 0 makes every one of them TIMER0's CAPTURE[1]:
- * CC[1] is TIMER0's count at most a microsecond old, which a load reads,
- * the kernel here and user mode through OP_CLOCK_FRAME alike; see COUNTER_ADDR in board.h.
+ * CC[1] is TIMER0's count at most a microsecond old, which a load reads; see COUNTER_ADDR in board.h.
  *
  * It is 32 bits wide, so the kernel counts its wraps, as the MPS2 boards do with theirs:
  * see kernel/board/mps2/timer.c, whose argument holds here with one core.

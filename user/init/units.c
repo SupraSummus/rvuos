@@ -299,6 +299,10 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
      * where a timer at the end of each would end its turn only to hand it back.
      * It lets the logger carry everything out first, and prints nothing as it spins.
      */
+    if (counter == 0) {
+        puts("root: no counter to load, so no tickless, requests, spans or overruns\n");
+        return;
+    }
     uint32_t status = logger_finish();
     uint32_t traps = spin_traps(counter, hz, SPIN_US / 1000u);
     expect("let the logger finish", status);

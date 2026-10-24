@@ -152,7 +152,7 @@ BOOT_PREFIX   := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --chip $(BOARD) --port $
 # The clock is the CLINT's mtime, which counts the core's cycles at the 160 MHz the kernel sets.
 BENCH_CPU_HZ  := clock
 # Where the ESP32-C5's transcripts differ from QEMU's, see tests/run.sh: a PMP grain of 128 bytes.
-BOARD_FACTS   := $(if $(filter esp32c5,$(BOARD)),BOARD_PMP_GRAIN=128)
+BOARD_FACTS   := $(if $(filter esp32c5,$(BOARD)),BOARD_PMP_GRAIN=128 BOARD_COUNTER=none)
 else ifeq ($(BOARD),rp2350)
 # The replay driver's layout is QEMU's, so only the demo is built, as for the ESP32-C6.
 # The runner loads the ELF's segments itself, and reboots into the cores the ELF is for; it needs pyusb.

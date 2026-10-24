@@ -86,11 +86,9 @@
 #endif
 
 /*
- * The counter BOOT_CAP_CLOCK names: TIMER0's TIMERAWL, which counts the same microseconds as mtime,
- * and which user mode reaches once board.c opens TIMER0 to it.
- * TIMER0 keeps the high half below the low one, at TIMERAWH, where OP_CLOCK_FRAME's reader need not look:
- * the frame gives the low half, and OP_CLOCK_READ the whole time.
- * On the Cortex-M33 it is the kernel's counter too, see arm/timer.c.
+ * TIMER0's TIMERAWL, which counts the same microseconds as mtime, on either kind of core:
+ * the Cortex-M33's counter under the clock, see arm/timer.c, and the console's, see cdc.c.
+ * TIMER0 keeps the high half below the low one, at TIMERAWH.
  */
 #define COUNTER_ADDR U32(0x400b0028)
 #define COUNTER_HZ   U32(1000000)
@@ -106,22 +104,24 @@
 
 /*
  * The devices the boot grants as frames from BOOT_CAP_DEVICES up, in this order,
- * devices a driver in user mode needs, none of them a bus master,
- * each 16 KiB, its registers and their atomic aliases, read and write.
- * IO_BANK0 and PADS_BANK0, the pins' functions and pads, and the three PIO blocks;
+ * devices a driver in user mode needs, none of them a bus master:
+ * IO_BANK0 and PADS_BANK0, the pins' functions and pads, and the three PIO blocks,
+ * each 16 KiB, its registers and their atomic aliases, read and write,
+ * and TIMER0's 32 bytes that hold the counter, read only, for a program to read with no call;
  * user/board/rp2350/devices.h names their slots.
  * board.c takes them out of reset and opens them to user mode in ACCESSCTRL,
  * and on Hazard3 opens every pin to Non-secure access, which is how user mode reaches the bus there.
  * The DMA, which reaches all of memory, and the devices the kernel keeps lie in none.
  * A device whose clock the kernel does not start, as the ADC's, never leaves reset, so it is not listed.
  */
-#define BOOT_DEVICES 5
+#define BOOT_DEVICES 6
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x40028000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
     { U32(0x40038000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
     { U32(0x50200000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
     { U32(0x50300000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
-    { U32(0x50400000), U32(0x00004000), RIGHT_R | RIGHT_W },
+    { U32(0x50400000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
+    { COUNTER_ADDR & ~U32(0x1f), U32(0x20), RIGHT_R },
 
 /* No further blocks of RAM beside the free RAM, which the ESP32-C6 has; see boot.c. */
 #define BOOT_RAM_BLOCKS 0

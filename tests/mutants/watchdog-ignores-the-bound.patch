@@ -8,7 +8,7 @@ Witness: fuzz watchdog-halts
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -206,7 +206,7 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
+@@ -200,7 +200,7 @@ static int op_clock(uint32_t op, uint32_t *arg)
      }
      case OP_CLOCK_WATCHDOG: {
          uint32_t us = arg[1];

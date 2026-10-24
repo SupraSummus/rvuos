@@ -58,8 +58,8 @@ These are documented gaps, not surprises;
   the first core takes every device interrupt;
   `DESIGN.md`, open decision 24.
 - **ARM with no replay yet**, under QEMU and on RP2350's Cortex-M33; `TODO.md`.
-- **No counter's frame to read on the ESP32-C5**, whose core refuses user mode the CLINT;
-  `DESIGN.md`, open decision 41.
+- **No counter to load on the ESP32-C5**, whose core refuses user mode the CLINT:
+  a program there reads the time only through `OP_CLOCK_READ`; `DESIGN.md`, decision 41.
 - **Boot from flash on the ESP32-C6 and ESP32-C5 alone.**
   RP2350 runs from RAM, loaded by its bootrom over USB, and the nRF52840 from RAM, loaded over SWD.
 - **No loader.**

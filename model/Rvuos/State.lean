@@ -51,10 +51,6 @@ structure Machine where
   procTablesOff : Nat
   tableSlotsOff : Nat
   threadProcOff : Nat
-  /-- `boot_granted[GRANT_COUNTER]`: the counter's block, its base, size and rights, which a clock gives out. -/
-  counterBase : Nat
-  counterSize : Nat
-  counterRights : Nat
 deriving Repr, Inhabited
 
 /-- The value at a key of an association list, the first if there are more. -/

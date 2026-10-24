@@ -28,9 +28,6 @@
 #define CLINT_TIMECTL  (CLINT_BASE + 0x04u)
 _Static_assert(CLINT_MTIME == CLINT_BASE + 0x08u && CLINT_MTIMECMP == CLINT_BASE + 0x10u,
                "board.h names this CLINT's registers");
-/* The copy of mtime user mode reads, 0x400 bytes up among the user timer's registers. */
-#define CLINT_UTIME    (CLINT_BASE + 0x408u)
-_Static_assert(CLINT_UTIME == COUNTER_ADDR, "the clock names the counter the timer compares with");
 #define TIMECTL_COUNTER_EN  (1u << 0)
 #define TIMECTL_TIMERINT_EN (1u << 1)
 

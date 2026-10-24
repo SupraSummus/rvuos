@@ -110,7 +110,6 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_CAP_REVOKE, CAP_CAPTABLE, 0, ARG_SLOT_INVOKED, ARG_NONE, ARG_NONE),
     OP(OP_CAP_DERIVE, CAP_CAPTABLE, 0, ARG_DST_INVOKED, ARG_ANY, ARG_RIGHTS),
     OP(OP_CLOCK_READ, CAP_CLOCK, 0, ARG_NONE, ARG_NONE, ARG_NONE),
-    OP(OP_CLOCK_FRAME, CAP_CLOCK, CAP_FRAME, ARG_DST, ARG_NONE, ARG_NONE),
     OP(OP_TIME_CARVE, CAP_TIME, CAP_TIME, ARG_OFFSET, ARG_COUNT, ARG_DST),
     OP(OP_TIME_BIND, CAP_TIME, 0, ARG_THREAD, ARG_OFFSET, ARG_COUNT),
     OP(OP_UNTYPED_SPLIT, CAP_UNTYPED, CAP_UNTYPED, ARG_DST, ARG_DST, ARG_NONE),
@@ -142,7 +141,7 @@ _Static_assert(OP_COUNT == 48 && OP_THREAD_OVERRUNS == OP_COUNT - 1, "a new oper
 /* A code below OP_COUNT that is no operation any more, see OP_COUNT, which the kernel refuses as any other. */
 static inline int op_retired(unsigned op)
 {
-    return op == 11 || op == 27;
+    return op == 11 || op == 26 || op == 27;
 }
 
 /* The loads and stores the driver makes itself, which invoke no capability. */

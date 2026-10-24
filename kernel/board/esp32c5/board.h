@@ -72,13 +72,6 @@
 #define CLINT_MTIME    U32(0x2000BFF8)
 #define CLINT_MTIMECMP U32(0x20004000)
 
-/*
- * The counter BOOT_CAP_CLOCK names: mtime, which counts the CPU's cycles at the clock timer_init measures.
- * The core has no copy of it for user mode, and refuses user mode the CLINT,
- * so a thread that maps the counter's frame faults on its load; see DESIGN.md, open decision 41.
- */
-#define COUNTER_ADDR CLINT_MTIME
-
 /* The CLIC's word for each interrupt, from interrupt 0; see clic.h. */
 #define CLIC_CTRL U32(0x20801000)
 

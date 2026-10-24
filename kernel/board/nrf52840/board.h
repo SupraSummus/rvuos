@@ -47,10 +47,10 @@
 #define UART_SIZE U32(0x2000)
 
 /*
- * The counter BOOT_CAP_CLOCK names: TIMER0 counting microseconds, 32 bits.
+ * The counter under the clock: TIMER0 counting microseconds, 32 bits.
  * A TIMER's count is read only by capturing it into a CC register,
  * so TIMER1 raises an event every microsecond and a PPI channel captures TIMER0's count into CC[1] at each,
- * which user mode then reads as a counter; see timer.c.
+ * which the kernel then reads as a counter; see timer.c.
  * It wraps every 71 minutes, and the kernel counts the wraps for its timer and for OP_CLOCK_READ.
  */
 #define TIMER0_BASE  U32(0x40008000)
@@ -75,21 +75,23 @@
  * RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4, read and write;
  * TIMER2, read and write, which times in microseconds what a driver waits for too briefly for a timer line,
  * such as IEEE 802.15.4's backoffs;
- * and TIMER3 and TIMER4, read and write, which a route wires to the radio, an acknowledgement's turnaround
- * and a count of the frames received, say; see the router below.
+ * TIMER3 and TIMER4, read and write, which a route wires to the radio, an acknowledgement's turnaround
+ * and a count of the frames received, say; see the router below;
+ * and TIMER0's 32 bytes of CC registers that hold the counter, read only, for a program to read with no call.
  * The radio is a bus master: its EasyDMA reads and writes a packet wherever PACKETPTR points, the kernel's RAM too,
  * so whoever holds its frame reaches all RAM, as the ESP32-C6's modem does,
  * and the root task gives it only to a driver it trusts as it trusts itself; see DESIGN.md, open decision 13.
  * user/board/nrf52840/devices.h names their slots.
- * TIMER0, TIMER1 and the PPI are the kernel's, for the counter, and lie in none.
+ * TIMER0, TIMER1 and the PPI are the kernel's, for the counter, and lie in no other.
  */
-#define BOOT_DEVICES 5
+#define BOOT_DEVICES 6
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x50000000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x40001000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x4000a000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x4001a000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x4001b000), U32(0x00001000), RIGHT_R | RIGHT_W },
+    { U32(0x4001b000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { COUNTER_ADDR & ~U32(0x1f), U32(0x20), RIGHT_R },
 
 /* No further blocks of RAM beside the free RAM, which the ESP32-C6 has; see boot.c. */
 #define BOOT_RAM_BLOCKS 0

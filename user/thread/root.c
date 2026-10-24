@@ -761,8 +761,8 @@ int main(void)
     route_check();
 
     uint64_t at;
-    uint32_t hz, counter;
-    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &at, &hz, &counter));
+    uint32_t hz;
+    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &at, &hz));
     link_init(&link, RADIO_BASE, TIMER2_BASE, radio_irq, radio_bit, timer_irq, timer_bit, MAC154_PAN_RVUOS,
               MAC154_ADDR_NRF, (uint32_t)at);
     say(&cout, "thread: the radio is on, set for IEEE 802.15.4\n");

@@ -83,13 +83,6 @@
 #define CLINT_MTIMECMP U32(0x20001810)
 
 /*
- * The counter BOOT_CAP_CLOCK names: UTIME, the CLINT's read-only copy of mtime for user mode,
- * at the CPU clock timer_init measures; ESP32-C6 TRM, "Timer Counter and Interrupt".
- * The core has no time CSR. Untried on the chip; see TODO.md.
- */
-#define COUNTER_ADDR U32(0x20001c08)
-
-/*
  * The window onto flash: FLASH_WINDOW_SIZE bytes of it from FLASH_WINDOW_FLASH,
  * which board.c maps through the cache at FLASH_WINDOW_BASE,
  * for a program too large for SRAM, such as the Wi-Fi system's driver, to run from.
@@ -110,13 +103,14 @@
  * eight bytes of LPPERI's: the rest of LPPERI reaches the LP domain's clocks and resets,
  * and the IO MUX and the GPIO matrix, the pins, for a program to set as its board wires them,
  * the flash's among them, so that whoever holds the IO MUX can cut the flash off,
- * and HP_SYSTEM, whose SRAM_USAGE hands a bank of SRAM to the modem's dump engine, which then writes it.
+ * HP_SYSTEM, whose SRAM_USAGE hands a bank of SRAM to the modem's dump engine, which then writes it,
+ * and UTIME, the CLINT's copy of mtime for user mode, read only, for a program to read the counter with no call.
  * PCR, PMU and the LP domain stay the kernel's: they reach the whole chip's clocks, power and resets.
  * The modem's two MACs, Wi-Fi's and 802.15.4's, are bus masters, which nothing confines,
  * so whoever holds the modem reaches all RAM; see DESIGN.md, open decision 13.
  * The dump engine is the modem's too, and whoever holds HP_SYSTEM as well can give it any bank, the kernel's too.
  */
-#define BOOT_DEVICES 9
+#define BOOT_DEVICES 10
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x6000E000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x600A0000), U32(0x00010000), RIGHT_R | RIGHT_W },    \
@@ -126,7 +120,8 @@
     { U32(0x600B2808), U32(0x00000008), RIGHT_R },             \
     { U32(0x60090000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x60095000), U32(0x00001000), RIGHT_R | RIGHT_W },
+    { U32(0x60095000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x20001c08), U32(0x00000008), RIGHT_R },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

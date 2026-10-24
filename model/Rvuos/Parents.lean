@@ -33,7 +33,7 @@ def isObjectType (t : Nat) : Bool :=
 def namesNothing (t : Nat) : Bool := t == capPrint || t == capHalt || t == capTest || t == capClock
 
 /-- `derived_from`: the node `c` may lie right below `p`. -/
-def derivedFrom (m : Machine) (s : State) (c p : Cap) : Bool :=
+def derivedFrom (s : State) (c p : Cap) : Bool :=
   let ct := kernelType c.type
   let pt := kernelType p.type
   -- What an Untyped made lies within it, and so does what came up to it from something it made that went;
@@ -51,9 +51,6 @@ def derivedFrom (m : Machine) (s : State) (c p : Cap) : Bool :=
     else if ct = capIrqLine ∨ ct = capTime ∨ ct = capRouteLine then sub c.rights p.rights && within c.a c.b p.a p.b
     else (sub c.rights p.rights || p.type == capRetyped) && (namesNothing ct || c.a == p.a) &&
       (ct != capNotification || sub c.b p.b)
-  -- A clock that reads gives out one frame, the counter's block, with no more rights than it was granted.
-  else if ct = capFrame ∧ pt = capClock then
-    p.rights &&& rightR != 0 && sub c.rights m.counterRights && within c.a c.b m.counterBase m.counterSize
   -- Below a pool's node, and below its capability, lies every capability to the pool's objects.
   else if pt = capPool then isObjectType ct && (s.obj? c.a).map (·.pool) == some p.a
   else false
@@ -71,10 +68,10 @@ def tablesOk (s : State) : Bool :=
     | none => true
 
 /-- Every node is derived from its parent, `derived_from` of `check_node`, and tables hold the ABI's types. -/
-def parentsOk (m : Machine) (s : State) : Bool :=
+def parentsOk (s : State) : Bool :=
   s.tablesOk && s.kids.all fun (p, l) => l.all fun k =>
     match s.cap? p, s.cap? k with
-    | some cp, some ck => derivedFrom m s ck cp
+    | some cp, some ck => derivedFrom s ck cp
     | _, _ => true
 
 end State

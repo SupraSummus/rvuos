@@ -102,8 +102,8 @@ uint32_t osi_interrupts(void)
 uint64_t osi_now_us(void)
 {
     uint64_t now;
-    uint32_t hz, counter;
-    rv_clock_read(osi.d->clock, &now, &hz, &counter);
+    uint32_t hz;
+    rv_clock_read(osi.d->clock, &now, &hz);
     return now / (hz / 1000000u);
 }
 

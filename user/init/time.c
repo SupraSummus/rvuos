@@ -51,6 +51,23 @@ static uint32_t period_wait(uint32_t us)
     return status == KERR_OK ? timer_wait() : status;
 }
 
+/*
+ * The counter's low word, mapped from the device the board lists for it, for a thread to load with no call,
+ * or 0 where the board lists none, as the ESP32-C5, whose core lets user mode load no counter.
+ */
+static uint32_t counter_map(void)
+{
+#ifdef BOOT_CAP_COUNTER
+    uint32_t base, size;
+    expect("find the counter", rv_frame_info(BOOT_CAP_COUNTER, &base, &size));
+    expect("map the counter",
+           rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_COUNTER_SLOT, BOOT_CAP_COUNTER, RIGHT_R));
+    return base + COUNTER_OFFSET;
+#else
+    return 0;
+#endif
+}
+
 void time_demo(uint32_t *hz_out, uint32_t *counter_out)
 {
     expect("allocate the timer's notification",
@@ -61,27 +78,19 @@ void time_demo(uint32_t *hz_out, uint32_t *counter_out)
            rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
 
     /*
-     * The clock times the two sleeps, through a call and through the counter's frame.
-     * A timer line fires no earlier than its delay, so either must show at least both;
+     * The clock times the two sleeps.
+     * A timer line fires no earlier than its delay, so it must show at least both;
      * how much more is the board's, so the transcript prints neither.
      */
-    uint64_t called, called_after;
-    uint32_t hz, counter;
-    expect("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &called, &hz, &counter));
-    expect("derive the counter's frame",
-           rv_invoke(OP_CLOCK_FRAME, BOOT_CAP_CLOCK, SLOT_COUNTER, 0, 0));
-    expect("map the counter",
-           rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_COUNTER_SLOT, SLOT_COUNTER, RIGHT_R));
-    uint32_t start = rv_counter_low(counter);
+    uint64_t start, end;
+    uint32_t hz;
+    expect("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &start, &hz));
     expect("sleep", sleep_us(SLEEP_US));
     expect("sleep again", sleep_us(SLEEP_US));
-    uint64_t elapsed = (uint32_t)(rv_counter_low(counter) - start);
-    expect("read the clock again", rv_clock_read(BOOT_CAP_CLOCK, &called_after, &hz, &counter));
+    expect("read the clock again", rv_clock_read(BOOT_CAP_CLOCK, &end, &hz));
     puts("root: timer ok\n");
     expect("the clock saw both sleeps",
-           elapsed * 1000000u >= (uint64_t)hz * (2 * SLEEP_US)
-                   && (called_after - called) * 1000000u >= (uint64_t)hz * (2 * SLEEP_US)
-               ? KERR_OK : KERR_INVALID_ARG);
+           (end - start) * 1000000u >= (uint64_t)hz * (2 * SLEEP_US) ? KERR_OK : KERR_INVALID_ARG);
     puts("root: clock ok\n");
     expect("sleep past a reload of the compare", sleep_us(LONG_SLEEP_US));
     puts("root: long sleep ok\n");
@@ -94,13 +103,14 @@ void time_demo(uint32_t *hz_out, uint32_t *counter_out)
      * A loop of sleeps would take a wake's lateness more per period.
      */
     expect("set the phase", period_wait(PERIOD_US));
-    start = rv_counter_low(counter);
+    expect("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &start, &hz));
     uint32_t status = KERR_OK;
     for (uint32_t i = 0; i < PERIODS && status == KERR_OK; i++) {
         status = period_wait(PERIOD_US);
     }
     expect("wait the periods", status);
-    elapsed = (uint64_t)(uint32_t)(rv_counter_low(counter) - start) * 1000000u;
+    expect("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &end, &hz));
+    uint64_t elapsed = (end - start) * 1000000u;
     expect("the periods kept their pace",
            elapsed >= (uint64_t)hz * ((PERIODS - 1) * PERIOD_US)
                    && elapsed < (uint64_t)hz * ((PERIODS + 1) * PERIOD_US)
@@ -113,5 +123,5 @@ void time_demo(uint32_t *hz_out, uint32_t *counter_out)
                ? KERR_OK : KERR_INVALID_ARG);
 
     *hz_out = hz;
-    *counter_out = counter;
+    *counter_out = counter_map();
 }

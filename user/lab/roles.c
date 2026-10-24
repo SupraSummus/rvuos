@@ -51,8 +51,8 @@ static uint32_t wait_server(const struct lab_page *p)
 static uint32_t now(const struct lab_page *p)
 {
     uint64_t t;
-    uint32_t hz, counter;
-    if (rv_clock_read(p->clock, &t, &hz, &counter) != KERR_OK) {
+    uint32_t hz;
+    if (rv_clock_read(p->clock, &t, &hz) != KERR_OK) {
         rv_breakpoint();
     }
     return (uint32_t)t;
@@ -297,8 +297,8 @@ void driver_main(struct child_page *c)
 {
     struct lab_page *p = (struct lab_page *)c;
     uint64_t t;
-    uint32_t hz, counter, skipped;
-    if (rv_clock_read(p->clock, &t, &hz, &counter) != KERR_OK) {
+    uint32_t hz, skipped;
+    if (rv_clock_read(p->clock, &t, &hz) != KERR_OK) {
         rv_breakpoint();
     }
     /* The period in counts, by whole milliseconds, as a period of whole ticks is, so that it does not overflow. */

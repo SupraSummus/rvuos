@@ -5,7 +5,8 @@
 # each exits with the status the kernel halted with.
 # A board whose core differs sets BOARD_FACTS in the Makefile: the PMP entries and grain the probe finds,
 # BOARD_MTVAL=zero where mtval reads zero, BOARD_MISALIGNED=trap for tests/escape.sh,
-# and BOARD_ARCH=arm where the fault is reported as ARMv7-M has it.
+# BOARD_ARCH=arm where the fault is reported as ARMv7-M has it,
+# and BOARD_COUNTER=none where the board lists no counter user mode loads, whose demo skips what it times so.
 # BOARD_CORES is how many cores the kernel runs on, whose demo goes on to the second.
 
 set -eu
@@ -17,6 +18,7 @@ board_grain=${BOARD_PMP_GRAIN:-4}
 board_mtval=${BOARD_MTVAL:-address}
 board_arch=${BOARD_ARCH:-riscv}
 board_cores=${BOARD_CORES:-1}
+board_counter=${BOARD_COUNTER:-device}
 log=$(mktemp)
 text=$(mktemp)
 trap 'rm -f "$log" "$text"' EXIT
@@ -96,7 +98,7 @@ grep -q 'root: cascade ok' "$text" \
 grep -q 'root: timer ok' "$text" \
     || fail "the timer did not wake the only thread from its sleep"
 grep -q 'root: clock ok' "$text" \
-    || fail "the clock's counter, read through its region, did not show the sleeps' length"
+    || fail "the clock did not show the sleeps' length"
 grep -q 'root: long sleep ok' "$text" \
     || fail "a sleep longer than one reload of the compare never woke the idle kernel"
 grep -q 'root: period ok' "$text" \
@@ -111,14 +113,18 @@ grep -q 'root: spare ok' "$text" \
     || fail "a thread without spare time ran past its units, or one with it did not run on spare time"
 grep -q 'root: charge ok' "$text" \
     || fail "a thread that waits between its rounds ran past its units"
-grep -q 'root: tickless ok' "$text" \
-    || fail "the timer interrupted the only thread to run at counts that changed nothing"
-grep -q 'root: requests ok' "$text" \
-    || fail "a request due before the turn's next waited past the end of the turn's request"
-grep -q 'root: spans ok' "$text" \
-    || fail "a thread woken within the span its wait gave waited for a turn due later"
-grep -q 'root: overruns ok' "$text" \
-    || fail "a driver on units enough for its work ran a request out, or one on too few did not"
+if [ "$board_counter" = none ]; then
+    grep -q 'root: no counter to load' "$text" || fail "the demo did not skip what it times with a counter the board does not list"
+else
+    grep -q 'root: tickless ok' "$text" \
+        || fail "the timer interrupted the only thread to run at counts that changed nothing"
+    grep -q 'root: requests ok' "$text" \
+        || fail "a request due before the turn's next waited past the end of the turn's request"
+    grep -q 'root: spans ok' "$text" \
+        || fail "a thread woken within the span its wait gave waited for a turn due later"
+    grep -q 'root: overruns ok' "$text" \
+        || fail "a driver on units enough for its work ran a request out, or one on too few did not"
+fi
 grep -q 'root: lend chain ok' "$text" \
     || fail "the end of a chain of lenders did not run on its head's time, or ran without it"
 grep -q 'the idle line stays quiet: ok' "$text" \

@@ -6,12 +6,12 @@
  * and clk_usb at 48 MHz from PLL_USB for the root task's console and the halt's, see halt.c;
  * the USB controller needs clk_sys above clk_usb, erratum RP2350-E12.
  * The tick generators divide clk_ref into microseconds
- * for Hazard3's mtime, for TIMER0's counter behind BOOT_CAP_CLOCK, and for the watchdog,
+ * for Hazard3's mtime, for TIMER0's counter, and for the watchdog,
  * which is armed at once, and fed only with the kernel's; see bootsel.h and board_watchdog.
  * Register addresses are those of the pico-sdk's hardware_regs for RP2350.
  *
  * User mode reaches a peripheral only where ACCESSCTRL lets it in, and at reset it lets it into few.
- * TIMER0 is opened for the clock, and the USB controller for the console.
+ * The USB controller is opened, for the console.
  * A process reaches it only through a frame besides, on either kind of core:
  * on Hazard3 the fence shuts the hardwired PMP entries that would leave every peripheral to user mode,
  * see process_fence, and on the Cortex-M33 a thread reaches only what its regions hold.
@@ -104,8 +104,8 @@
 #define ACCESSCTRL_PIO2     0x40060054u
 #define ACCESSCTRL_IO_BANK0 0x40060068u
 #define ACCESSCTRL_PADS_BANK0 0x40060070u
-#define ACCESSCTRL_TIMER0   0x40060098u
 #define ACCESSCTRL_USBCTRL  0x40060048u
+#define ACCESSCTRL_TIMER0   0x40060098u
 #define ACCESSCTRL_PASSWORD 0xacce0000u
 #define ACCESSCTRL_SU       (1u << 2)
 #define ACCESSCTRL_NSP      (1u << 1)
@@ -208,7 +208,6 @@ void board_init(void)
     bootsel_arm(WATCHDOG_LONGEST);
 
     unreset(RESET_TIMER0);
-    open_to_user(ACCESSCTRL_TIMER0);
     /* The console's, BOOT_CAP_UART: reset, whatever the bootrom's BOOTSEL left in it; see board.h. */
     unreset(RESET_USBCTRL);
     open_to_user(ACCESSCTRL_USBCTRL);
@@ -224,6 +223,7 @@ void board_init(void)
     open_to_user(ACCESSCTRL_PIO0);
     open_to_user(ACCESSCTRL_PIO1);
     open_to_user(ACCESSCTRL_PIO2);
+    open_to_user(ACCESSCTRL_TIMER0);
 #ifdef __riscv
     REG(ACCESSCTRL_GPIO_NSMASK0) = 0xffffffffu;
     REG(ACCESSCTRL_GPIO_NSMASK1) = 0x0000ffffu;

@@ -44,7 +44,6 @@ enum {
     SLOT_SPARE_IRQ,     /* the line bound to SLOT_TIMER_NTFN */
     SLOT_BOOT_NTFN,     /* a notification in the boot pool, for binding the line again */
     SLOT_SPARE_IRQ_AGAIN,
-    SLOT_COUNTER,       /* the clock's frame, read only */
     SLOT_HALF_TIME,     /* the second half of the processor's units, the child's and then the spinners' */
     SLOT_CAPPED_TIME,   /* the same units without spare time, derived from those */
     SLOT_FREEZE_TIME,   /* every unit without spare time, to stop a thread for good */
@@ -176,7 +175,7 @@ uint32_t logger_finish(void);
 /* child.c */
 void child_main(void);
 
-/* time.c: bind the timer and time it on the clock; the counter's rate and where it is mapped come back. */
+/* time.c: bind the timer and time it on the clock; the counter's rate and where it is mapped, or 0, come back. */
 void time_demo(uint32_t *hz, uint32_t *counter);
 
 /* units.c: run threads on units of the processor and on spare time, their stacks below the first quarter of the data. */

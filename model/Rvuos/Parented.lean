@@ -55,42 +55,39 @@ theorem State.range?_frameKind (s : State) {c : Cap} (h : kernelType c.type = ca
   rcases kernelType_frame.mp h with e | e | e <;> simp [State.range?, e]
 
 /-- `derivedFrom`, case by case. -/
-inductive Derives (m : Machine) (s : State) : Cap → Cap → Prop
+inductive Derives (s : State) : Cap → Cap → Prop
   /-- What an Untyped made, or what came up to it, within its block. -/
   | untyped {c p : Cap} {b z pb pz : Nat} : p.type = capUntyped → s.range? c = some (b, z) → s.range? p = some (pb, pz) →
       (c.type = capUntyped ∨ kernelType c.type = capFrame ∨ c.type = capRetyped) →
-      (sub c.rights p.rights = true ∨ c.type = capRetyped) → within b z pb pz = true → Derives m s c p
+      (sub c.rights p.rights = true ∨ c.type = capRetyped) → within b z pb pz = true → Derives s c p
   /-- A frame, an installed region or a Route's end within a frame. -/
   | frame {c p : Cap} : kernelType c.type = capFrame → kernelType p.type = capFrame →
-      sub c.rights p.rights = true → within c.a c.b p.a p.b = true → Derives m s c p
+      sub c.rights p.rights = true → within c.a c.b p.a p.b = true → Derives s c p
   /-- A thread's units among those of the capability it was bound through. -/
   | bound {c p : Cap} : c.type = capBound → kernelType p.type = capTime →
-      sub c.rights p.rights = true → unitsWithin c.a c.b p.a p.b = true → Derives m s c p
+      sub c.rights p.rights = true → unitsWithin c.a c.b p.a p.b = true → Derives s c p
   /-- A range of lines, units or channels within one of its type. -/
   | range {c p : Cap} : kernelType c.type = kernelType p.type →
       (kernelType c.type = capIrqLine ∨ kernelType c.type = capTime ∨ kernelType c.type = capRouteLine) →
-      c.type ≠ capBound → sub c.rights p.rights = true → within c.a c.b p.a p.b = true → Derives m s c p
+      c.type ≠ capBound → sub c.rights p.rights = true → within c.a c.b p.a p.b = true → Derives s c p
   /-- The same object, or nothing, with no more rights, and for a notification no more bits. -/
   | same {c p : Cap} : kernelType c.type = kernelType p.type → kernelType c.type ≠ capUntyped →
       kernelType c.type ≠ capFrame → kernelType c.type ≠ capIrqLine → kernelType c.type ≠ capTime →
       kernelType c.type ≠ capRouteLine →
       (sub c.rights p.rights = true ∨ p.type = capRetyped) → (namesNothing (kernelType c.type) = true ∨ c.a = p.a) →
-      (kernelType c.type ≠ capNotification ∨ sub c.b p.b = true) → Derives m s c p
-  /-- The counter's block below a clock that reads. -/
-  | clock {c p : Cap} : kernelType c.type = capFrame → kernelType p.type = capClock → p.rights &&& rightR ≠ 0 →
-      sub c.rights m.counterRights = true → within c.a c.b m.counterBase m.counterSize = true → Derives m s c p
+      (kernelType c.type ≠ capNotification ∨ sub c.b p.b = true) → Derives s c p
   /-- A capability to an object below its pool's. -/
   | pool {c p : Cap} : kernelType p.type = capPool → isObjectType (kernelType c.type) = true →
-      (s.obj? c.a).map (·.pool) = some p.a → Derives m s c p
+      (s.obj? c.a).map (·.pool) = some p.a → Derives s c p
 
 private theorem if_yes {α : Type} {q : Prop} [Decidable q] {a b : α} (h : q) : (if q then a else b) = a := by simp [h]
 
 private theorem if_no {α : Type} {q : Prop} [Decidable q] {a b : α} (h : ¬q) : (if q then a else b) = b := by simp [h]
 
 section
-variable {m : Machine} {s : State} {c p : Cap}
+variable {s : State} {c p : Cap}
 
-theorem derives_of (h : derivedFrom m s c p = true) : Derives m s c p := by
+theorem derives_of (h : derivedFrom s c p = true) : Derives s c p := by
   unfold derivedFrom at h
   dsimp only at h
   split at h
@@ -135,18 +132,13 @@ theorem derives_of (h : derivedFrom m s c p = true) : Derives m s c p := by
     · exact Or.inl e
   rename_i h2
   split at h
-  · rename_i h6
-    simp only [Bool.and_eq_true, bne_iff_ne, ne_eq] at h
-    exact .clock h6.1 h6.2 h.1.1 h.1.2 h.2
-  rename_i h6
-  split at h
   · rename_i h7
     simp only [Bool.and_eq_true, beq_iff_eq] at h
     exact .pool h7 h.1 h.2
   · simp at h
 
 /-- The converse: `Derives` says no more than `derivedFrom`, so what is proved of it is what `model-check` checks. -/
-theorem derivedFrom_of (h : Derives m s c p) : derivedFrom m s c p = true := by
+theorem derivedFrom_of (h : Derives s c p) : derivedFrom s c p = true := by
   unfold derivedFrom
   dsimp only
   have notU : ∀ {q : Cap}, kernelType q.type ≠ capUntyped → q.type ≠ capUntyped :=
@@ -180,14 +172,10 @@ theorem derivedFrom_of (h : Derives m s c p) : derivedFrom m s c p = true := by
     rcases hb with e | e
     · exact Or.inl e
     · exact Or.inr e
-  | clock hc hp hR hr hw =>
-    rw [if_no (notU (by rw [hp]; decide)), if_no (by rw [hc, hp]; decide), if_yes ⟨hc, hp⟩]
-    simp only [Bool.and_eq_true, bne_iff_ne]
-    exact ⟨⟨hR, hr⟩, hw⟩
   | pool hp ho hpool =>
     have hpo : isObjectType (kernelType p.type) = false := by rw [hp]; decide
     have hne : kernelType c.type ≠ kernelType p.type := fun e => by rw [e] at ho; simp [hpo] at ho
-    rw [if_no (notU (by rw [hp]; decide)), if_no hne, if_no (fun e => absurd (e.2.symm.trans hp) (by decide)), if_yes hp]
+    rw [if_no (notU (by rw [hp]; decide)), if_no hne, if_yes hp]
     simp [ho, hpool]
 
 /-! Ranges within ranges. -/
@@ -215,8 +203,8 @@ macro "types_apart" : tactic => `(tactic| (exfalso; (try simp only [isObjectType
 A derivation goes over a node that is not a pool's own node:
 what was derived from it is derived from its parent, so its children come up to the parent derived.
 -/
-theorem Derives.trans {k n : Cap} (h₁ : Derives m s k n) (h₂ : Derives m s n p) (hn : n.type ≠ capRetyped) :
-    Derives m s k p := by
+theorem Derives.trans {k n : Cap} (h₁ : Derives s k n) (h₂ : Derives s n p) (hn : n.type ≠ capRetyped) :
+    Derives s k p := by
   have hnu := kernelType_untyped (t := n.type)
   cases h₂ with
   | untyped hp hrn hrp hty hr hw =>
@@ -265,17 +253,9 @@ theorem Derives.trans {k n : Cap} (h₁ : Derives m s k n) (h₂ : Derives m s n
         · rcases hb with e' | e'
           · exact Or.inl (fun e'' => e' (ht₁ ▸ e''))
           · exact Or.inr (sub_trans e e')
-    case clock hk hnc hR hr₁ hw₁ =>
-      have hr' : sub n.rights p.rights = true := hr.resolve_right (fun e => by
-        rw [e] at ht; rw [hnc] at ht; exact absurd ht (by decide))
-      exact .clock hk (ht ▸ hnc) (sub_right hr' hR) hr₁ hw₁
     case pool hnp ho hpool =>
       have ha : n.a = p.a := hnn.resolve_left (by rw [hnp]; decide)
       exact .pool (ht ▸ hnp) ho (ha ▸ hpool)
-    all_goals types_apart
-  | clock hn' hp hR hr hw =>
-    cases h₁
-    case frame hk _ hr₁ hw₁ => exact .clock hk hp hR (sub_trans hr₁ hr) (within_trans hw₁ hw)
     all_goals types_apart
   | pool hp ho hpool =>
     cases h₁
@@ -292,8 +272,8 @@ theorem State.range?_congr (s : State) {c c' : Cap} (ht : c'.type = c.type) (ha 
   simp [State.range?, ht, ha, hb]
 
 /-- A derivation holds of a node with fewer rights. -/
-theorem Derives.narrow (h : Derives m s c p) {c' : Cap} (ht : c'.type = c.type) (ha : c'.a = c.a) (hb : c'.b = c.b)
-    (hr : sub c'.rights c.rights = true) : Derives m s c' p := by
+theorem Derives.narrow (h : Derives s c p) {c' : Cap} (ht : c'.type = c.type) (ha : c'.a = c.a) (hb : c'.b = c.b)
+    (hr : sub c'.rights c.rights = true) : Derives s c' p := by
   cases h with
   | untyped hp hrc hrp hty hr' hw =>
     exact .untyped hp (by rw [State.range?_congr s ht ha hb, hrc]) hrp (ht ▸ hty)
@@ -304,13 +284,12 @@ theorem Derives.narrow (h : Derives m s c p) {c' : Cap} (ht : c'.type = c.type) 
   | same h1 h2 h3 h4 h5 h6 hr' hn hb' =>
     exact .same (ht ▸ h1) (ht ▸ h2) (ht ▸ h3) (ht ▸ h4) (ht ▸ h5) (ht ▸ h6) (hr'.imp_left (sub_trans hr ·))
       (ht ▸ ha ▸ hn) (ht ▸ hb ▸ hb')
-  | clock hc hp hR hr' hw => exact .clock (ht ▸ hc) hp hR (sub_trans hr hr') (ha ▸ hb ▸ hw)
   | pool hp ho hpool => exact .pool hp (ht ▸ ho) (ha ▸ hpool)
 
 theorem within_self (b z : Nat) : within b z b z = true := by simp [within]
 
 /-- A derive: a capability of the ABI's types, its rights masked, below itself. -/
-theorem Derives.masked (hty : c.type < capInstalled) (x : Nat) : Derives m s { c with rights := c.rights &&& x } c := by
+theorem Derives.masked (hty : c.type < capInstalled) (x : Nat) : Derives s { c with rights := c.rights &&& x } c := by
   have hk := kernelType_abi hty
   by_cases hu : c.type = capUntyped
   · have hr := State.range?_untyped s hu
@@ -327,7 +306,7 @@ theorem Derives.masked (hty : c.type < capInstalled) (x : Nat) : Derives m s { c
     (by simpa [hk] using hrg.2.1) (by simpa [hk] using hrg.2.2) (Or.inl (sub_mask _ _)) (Or.inr rfl) (Or.inr (sub_self _))
 
 /-- An Untyped marked going is the parent it was: the mark lies where its block does not. -/
-theorem Derives.markGoing {k : Cap} (h : Derives m s k c) : Derives m s k c.markGoing := by
+theorem Derives.markGoing {k : Cap} (h : Derives s k c) : Derives s k c.markGoing := by
   unfold Cap.markGoing
   split
   · rename_i hu
@@ -339,7 +318,7 @@ theorem Derives.markGoing {k : Cap} (h : Derives m s k c) : Derives m s k c.mark
     all_goals types_apart
   · exact h
 
-theorem Derives.objs {s' : State} (hobjs : s'.objs = s.objs) (h : Derives m s c p) : Derives m s' c p := by
+theorem Derives.objs {s' : State} (hobjs : s'.objs = s.objs) (h : Derives s c p) : Derives s' c p := by
   have hobj : ∀ a, s'.obj? a = s.obj? a := fun a => by simp [State.obj?, hobjs]
   cases h with
   | untyped hp hrc hrp hty hr hw =>
@@ -348,22 +327,21 @@ theorem Derives.objs {s' : State} (hobjs : s'.objs = s.objs) (h : Derives m s c 
   | bound h1 h2 h3 h4 => exact .bound h1 h2 h3 h4
   | range h1 h2 h3 h4 h5 => exact .range h1 h2 h3 h4 h5
   | same h1 h2 h3 h4 h5 h6 h7 h8 h9 => exact .same h1 h2 h3 h4 h5 h6 h7 h8 h9
-  | clock h1 h2 h3 h4 h5 => exact .clock h1 h2 h3 h4 h5
   | pool hp ho hpool => exact .pool hp ho (by rw [hobj]; exact hpool)
 
 end
 
 /-- `State.parentsOk`, said of the lists. -/
-structure Parented (m : Machine) (s : State) : Prop where
+structure Parented (s : State) : Prop where
   tables : ∀ o, o ∈ s.objs → o.type = capCaptable → ∀ i, i < o.count → ∀ c, s.cap? (nodeAt o i) = some c →
     c.type < capInstalled
-  edges : ∀ p k cp ck, k ∈ s.kidsOf p → s.cap? p = some cp → s.cap? k = some ck → Derives m s ck cp
+  edges : ∀ p k cp ck, k ∈ s.kidsOf p → s.cap? p = some cp → s.cap? k = some ck → Derives s ck cp
 
 section
-variable {m : Machine} {s : State}
+variable {s : State}
 
 /-- Every state `model-check` passes holds `Parented`. -/
-theorem checked_parented (h : s.parentsOk m = true) : Parented m s := by
+theorem checked_parented (h : s.parentsOk = true) : Parented s := by
   simp only [State.parentsOk, State.tablesOk, Bool.and_eq_true, List.all_eq_true] at h
   obtain ⟨ht, hk⟩ := h
   refine ⟨fun o ho hty i hi c hc => ?_, fun p k cp ck hkp hp hk' => derives_of ?_⟩
@@ -374,9 +352,9 @@ theorem checked_parented (h : s.parentsOk m = true) : Parented m s := by
     simpa [hp, hk'] using this
 
 /-- A state with no edge and no node the first had not, and the same objects. -/
-theorem Parented.sub {s' : State} (h : Parented m s) (hobjs : s'.objs = s.objs)
+theorem Parented.sub {s' : State} (h : Parented s) (hobjs : s'.objs = s.objs)
     (hk : ∀ q k, k ∈ s'.kidsOf q → k ∈ s.kidsOf q) (hc : ∀ x c, s'.cap? x = some c → s.cap? x = some c) :
-    Parented m s' where
+    Parented s' where
   tables o ho hty i hi c hx := h.tables o (hobjs ▸ ho) hty i hi c (hc _ _ hx)
   edges p k cp ck hkp hp hk' := (h.edges p k cp ck (hk _ _ hkp) (hc _ _ hp) (hc _ _ hk')).objs hobjs
 
@@ -384,9 +362,9 @@ theorem State.cap?_detachAdopt (s : State) (n k : Nat) : (s.detachAdopt n).cap? 
   unfold State.detachAdopt; split <;> simp [State.cap?_setKids]
 
 /-- An edge between two nodes that were there before, where one empty node is filled. -/
-theorem Parented.old (h : Parented m s) (hf : Forest s) {n q k : Nat} {c cq ck : Cap} (hn : s.cap? n = none)
+theorem Parented.old (h : Parented s) (hf : Forest s) {n q k : Nat} {c cq ck : Cap} (hn : s.cap? n = none)
     (hk : k ∈ s.kidsOf q) (hq : (if q = n then some c else s.cap? q) = some cq)
-    (hk' : (if k = n then some c else s.cap? k) = some ck) : Derives m s ck cq := by
+    (hk' : (if k = n then some c else s.cap? k) = some ck) : Derives s ck cq := by
   obtain ⟨hroot, hleaf⟩ := hf.empty hn
   have hkn : k ≠ n := fun e => hroot q (e ▸ hk)
   have hqn : q ≠ n := fun e => by rw [e, hleaf] at hk; simp at hk
@@ -394,9 +372,9 @@ theorem Parented.old (h : Parented m s) (hf : Forest s) {n q k : Nat} {c cq ck :
   exact h.edges _ _ _ _ hk hq hk'
 
 /-- `store` below a filled node: an empty node filled with the ABI's type, derived from the parent. -/
-theorem Parented.store (h : Parented m s) (hf : Forest s) {n p : Nat} {c cp : Cap} (hn : s.cap? n = none)
-    (hp : s.cap? p = some cp) (hty : c.type < capInstalled) (hd : Derives m s c cp) :
-    Parented m (store s n c (some p)) := by
+theorem Parented.store (h : Parented s) (hf : Forest s) {n p : Nat} {c cp : Cap} (hn : s.cap? n = none)
+    (hp : s.cap? p = some cp) (hty : c.type < capInstalled) (hd : Derives s c cp) :
+    Parented (store s n c (some p)) := by
   have hpn : p ≠ n := by intro e; subst e; simp [hn] at hp
   have hobjs : (Rvuos.store s n c (some p)).objs = s.objs := rfl
   refine ⟨fun o ho ht i hi c' hx => ?_, fun q k cq ck hk hq hk' => ?_⟩
@@ -416,9 +394,9 @@ theorem Parented.store (h : Parented m s) (hf : Forest s) {n p : Nat} {c cp : Ca
     · exact h.old hf hn hk hq hk'
 
 /-- A copy: an empty node filled with the ABI's type beside a node, derived from that node's parent. -/
-theorem Parented.beside (h : Parented m s) (hf : Forest s) {n b : Nat} {c : Cap} (hn : s.cap? n = none)
-    (hty : c.type < capInstalled) (hd : ∀ q cq, b ∈ s.kidsOf q → s.cap? q = some cq → Derives m s c cq) :
-    Parented m ((s.setCap n c).attachBeside b n) := by
+theorem Parented.beside (h : Parented s) (hf : Forest s) {n b : Nat} {c : Cap} (hn : s.cap? n = none)
+    (hty : c.type < capInstalled) (hd : ∀ q cq, b ∈ s.kidsOf q → s.cap? q = some cq → Derives s c cq) :
+    Parented ((s.setCap n c).attachBeside b n) := by
   obtain ⟨hroot, -⟩ := hf.empty hn
   have hobjs := objs_beside s n b c
   have hcap : ∀ x, ((s.setCap n c).attachBeside b n).cap? x = if x = n then some c else s.cap? x := fun x => by
@@ -448,8 +426,8 @@ theorem Parented.beside (h : Parented m s) (hf : Forest s) {n b : Nat} {c : Cap}
       · exact h.old hf hn hk hq hk'
 
 /-- `cap_move`: the node at an empty one, of the ABI's type, where it stood. -/
-theorem Parented.move (h : Parented m s) (hf : Forest s) {src dst : Nat} {c : Cap} (hsrc : s.cap? src = some c)
-    (hdst : s.cap? dst = none) (hty : c.type < capInstalled) : Parented m (s.move src dst) := by
+theorem Parented.move (h : Parented s) (hf : Forest s) {src dst : Nat} {c : Cap} (hsrc : s.cap? src = some c)
+    (hdst : s.cap? dst = none) (hty : c.type < capInstalled) : Parented (s.move src dst) := by
   have hcap := fun k => State.cap?_move s src dst k c hsrc
   have hobjs := objs_move s src dst
   have filled_ne : ∀ x, (s.cap? x).isSome → x ≠ dst := by intro x hx e; subst e; simp [hdst] at hx
@@ -482,8 +460,8 @@ theorem Parented.move (h : Parented m s) (hf : Forest s) {src dst : Nat} {c : Ca
           exact h.edges _ _ _ _ hx hq hk'
 
 /-- `detachAdopt` and the clear after it: the node's children come up to its parent, derived from it. -/
-theorem Parented.detachErase (h : Parented m s) (hf : Forest s) {n p : Nat} {cn : Cap} (hp : n ∈ s.kidsOf p)
-    (hcn : s.cap? n = some cn) (hnr : cn.type ≠ capRetyped) : Parented m ((s.detachAdopt n).eraseCap n) := by
+theorem Parented.detachErase (h : Parented s) (hf : Forest s) {n p : Nat} {cn : Cap} (hp : n ∈ s.kidsOf p)
+    (hcn : s.cap? n = some cn) (hnr : cn.type ≠ capRetyped) : Parented ((s.detachAdopt n).eraseCap n) := by
   have hobjs := objs_detachErase s n
   have hcap : ∀ x, ((s.detachAdopt n).eraseCap n).cap? x = if x = n then none else s.cap? x := fun x => by
     rw [State.cap?_eraseCap, State.cap?_detachAdopt]
@@ -509,8 +487,8 @@ theorem Parented.detachErase (h : Parented m s) (hf : Forest s) {n p : Nat} {cn 
     · exact h.edges _ _ _ _ hk hq hk'
 
 /-- A root marked going, its children derived from it as they were. -/
-theorem Parented.markGoing (h : Parented m s) {n : Nat} {c : Cap} (hc : s.cap? n = some c)
-    (hroot : ∀ q, n ∉ s.kidsOf q) : Parented m (s.setCap n c.markGoing) := by
+theorem Parented.markGoing (h : Parented s) {n : Nat} {c : Cap} (hc : s.cap? n = some c)
+    (hroot : ∀ q, n ∉ s.kidsOf q) : Parented (s.setCap n c.markGoing) := by
   have hty : c.markGoing.type = c.type := by unfold Cap.markGoing; split <;> rfl
   refine ⟨fun o ho ht i hi c' hx => ?_, fun q k cq ck hk hq hk' => ?_⟩
   · rw [State.cap?_setCap] at hx; split at hx
@@ -527,13 +505,13 @@ theorem Parented.markGoing (h : Parented m s) {n : Nat} {c : Cap} (hc : s.cap? n
 
 /-- `cap_delete` of a root, a step a child: what is left of it at every step, no edge new. -/
 theorem deleteRoot_parented (n : Nat) (r : List Nat) (ks : List Nat) :
-    ∀ (s : State) (acc : List Outcome) (o : Outcome), Parented m s → ks = s.kidsOf n →
-      o ∈ deleteRoot n r ks s acc → o ∈ acc ∨ Parented m o.st := by
-  have erase : ∀ s : State, Parented m s → Parented m (s.eraseCap n) := fun s h =>
+    ∀ (s : State) (acc : List Outcome) (o : Outcome), Parented s → ks = s.kidsOf n →
+      o ∈ deleteRoot n r ks s acc → o ∈ acc ∨ Parented o.st := by
+  have erase : ∀ s : State, Parented s → Parented (s.eraseCap n) := fun s h =>
     h.sub rfl (fun q k hk => by rwa [State.kidsOf_eraseCap] at hk)
       (fun x c hx => by rw [State.cap?_eraseCap] at hx; split at hx; · simp at hx
                         exact hx)
-  have shrink : ∀ (s : State) (l : List Nat), Parented m s → (∀ y ∈ l, y ∈ s.kidsOf n) → Parented m (s.setKids n l) :=
+  have shrink : ∀ (s : State) (l : List Nat), Parented s → (∀ y ∈ l, y ∈ s.kidsOf n) → Parented (s.setKids n l) :=
     fun s l h hl => h.sub rfl
       (fun q k hk => by
         rw [State.kidsOf_setKids] at hk
@@ -569,8 +547,8 @@ theorem deleteRoot_parented (n : Nat) (r : List Nat) (ks : List Nat) :
 
 /-- `cap_revoke_below`'s loop: each node it takes is no pool's own node, so what was below it comes up derived. -/
 theorem revokeLoop_parented (m : Machine) (t slot root : Nat) (r : List Nat) :
-    ∀ (fuel : Nat) (s : State) (acc outs : List Outcome), Forest s → Parented m s →
-      revokeLoop m t slot root r fuel s acc = some outs → ∀ o ∈ outs, o ∈ acc ∨ Parented m o.st := by
+    ∀ (fuel : Nat) (s : State) (acc outs : List Outcome), Forest s → Parented s →
+      revokeLoop m t slot root r fuel s acc = some outs → ∀ o ∈ outs, o ∈ acc ∨ Parented o.st := by
   intro fuel
   induction fuel with
   | zero => intro s acc outs _ _ h; simp [revokeLoop] at h
@@ -646,7 +624,7 @@ theorem Held.table {t n : Nat} (h : Held m s t n) :
     · simp at hs
 
 /-- So what a thread reaches is of the ABI's types. -/
-theorem Parented.held {t n : Nat} {c : Cap} (h : Parented m s) (hh : Held m s t n) (hc : s.cap? n = some c) :
+theorem Parented.held {t n : Nat} {c : Cap} (h : Parented s) (hh : Held m s t n) (hc : s.cap? n = some c) :
     c.type < capInstalled := by
   obtain ⟨o, i, ho, ht, hi, rfl⟩ := hh.table
   exact h.tables o ho ht i hi c hc
@@ -674,13 +652,13 @@ theorem capDelete_at {table : Obj} {r : List Nat} {outs : List Outcome} (h : cap
 
 /-! Each handler, in every outcome it names. -/
 
-theorem one_parented {o : Outcome} {x : State} {k : Ret} (hx : Parented m x) (ho : o ∈ [(⟨x, k⟩ : Outcome)]) :
-    Parented m o.st := by
+theorem one_parented {o : Outcome} {x : State} {k : Ret} (hx : Parented x) (ho : o ∈ [(⟨x, k⟩ : Outcome)]) :
+    Parented o.st := by
   rw [List.mem_singleton] at ho; subst ho; exact hx
 
 /-- A copy beside its source, derived from the source's parent; a derive below it, from the source. -/
-theorem capCopy_parented (h : Parented m s) (hf : Forest s) {t : Nat} {derive : Bool} {table : Obj} {r : List Nat}
-    {outs : List Outcome} (hh : capCopy m s t derive table r = .ok (some outs)) : ∀ o ∈ outs, Parented m o.st := by
+theorem capCopy_parented (h : Parented s) (hf : Forest s) {t : Nat} {derive : Bool} {table : Obj} {r : List Nat}
+    {outs : List Outcome} (hh : capCopy m s t derive table r = .ok (some outs)) : ∀ o ∈ outs, Parented o.st := by
   intro o ho
   obtain ⟨source, src, dst, hl, hdst, rfl⟩ := capCopy_ok hh
   obtain ⟨held, hsrc⟩ := slotLookup_held hl
@@ -690,17 +668,17 @@ theorem capCopy_parented (h : Parented m s) (hf : Forest s) {t : Nat} {derive : 
   · exact h.beside hf hdst hty (fun q cq hq hcq => (h.edges _ _ _ _ hq hcq hsrc).narrow rfl rfl rfl (sub_mask _ _))
   · exact h.store hf hdst hsrc hty (Derives.masked hty _)
 
-theorem capMove_parented (h : Parented m s) (hf : Forest s) {t : Nat} {table : Obj} {r : List Nat}
-    {outs : List Outcome} (hh : capMove m s t table r = .ok (some outs)) : ∀ o ∈ outs, Parented m o.st := by
+theorem capMove_parented (h : Parented s) (hf : Forest s) {t : Nat} {table : Obj} {r : List Nat}
+    {outs : List Outcome} (hh : capMove m s t table r = .ok (some outs)) : ∀ o ∈ outs, Parented o.st := by
   intro o ho
   obtain ⟨_, _, _, hl, hdst, rfl⟩ := capMove_ok hh
   obtain ⟨held, hsrc⟩ := slotLookup_held hl
   exact one_parented (h.move hf hsrc hdst (h.held held hsrc)) ho
 
 /-- A delete takes a table's slot, which holds no pool's own node. -/
-theorem capDelete_parented (h : Parented m s) (hf : Forest s) {table : Obj} (hmem : table ∈ s.objs)
+theorem capDelete_parented (h : Parented s) (hf : Forest s) {table : Obj} (hmem : table ∈ s.objs)
     (htt : table.type = capCaptable) {r : List Nat} {outs : List Outcome}
-    (hh : capDelete s table r = .ok (some outs)) : ∀ o ∈ outs, Parented m o.st := by
+    (hh : capDelete s table r = .ok (some outs)) : ∀ o ∈ outs, Parented o.st := by
   intro o ho
   rcases capDelete_at hh with rfl | ⟨hlt, c, hc, ⟨p, hp, rfl⟩ | ⟨hp, rfl⟩⟩
   · exact one_parented h ho
@@ -711,9 +689,9 @@ theorem capDelete_parented (h : Parented m s) (hf : Forest s) {table : Obj} (hme
     · exact h'
 
 /-- A carve: a frame within the frame, with its rights. -/
-theorem opFrame_parented (h : Parented m s) (hf : Forest s) (hd : Derived s) {t op node : Nat} {c : Cap}
+theorem opFrame_parented (h : Parented s) (hf : Forest s) (hd : Derived s) {t op node : Nat} {c : Cap}
     {r : List Nat} {outs : List Outcome} (hc : s.cap? node = some c) (hty : c.type = capFrame)
-    (hh : opFrame m s t op node c r = .ok (some outs)) : ∀ o ∈ outs, Parented m o.st := by
+    (hh : opFrame m s t op node c r = .ok (some outs)) : ∀ o ∈ outs, Parented o.st := by
   intro o ho
   obtain ⟨dst, -, hoff, hlen, hdst, rfl⟩ := opFrame_ok hh
   have hfit := hd.fits node c hc hty
@@ -725,9 +703,9 @@ theorem opFrame_parented (h : Parented m s) (hf : Forest s) (hd : Derived s) {t 
   simp only [hbase, within, Bool.and_eq_true, decide_eq_true_eq]; omega
 
 /-- A retype into a frame: a frame of the whole block, with the Untyped's rights. -/
-theorem untypedRetype_parented (h : Parented m s) (hf : Forest s) {t u : Nat} {c : Cap} {r : List Nat}
+theorem untypedRetype_parented (h : Parented s) (hf : Forest s) {t u : Nat} {c : Cap} {r : List Nat}
     {outs : List Outcome} (hc : s.cap? u = some c) (hty : c.type = capUntyped)
-    (hh : untypedRetype m s t u c r = .ok (some outs)) : ∀ o ∈ outs, Parented m o.st := by
+    (hh : untypedRetype m s t u c r = .ok (some outs)) : ∀ o ∈ outs, Parented o.st := by
   intro o ho
   obtain ⟨dst, ret, hdst, rfl⟩ := untypedRetype_ok hh
   refine one_parented ?_ ho
@@ -735,9 +713,9 @@ theorem untypedRetype_parented (h : Parented m s) (hf : Forest s) {t u : Nat} {c
     (Or.inr (Or.inl (show kernelType capFrame = capFrame by decide))) (Or.inl (sub_self _)) (within_self _ _))
 
 /-- A split: two halves, each within the block, where the smallest region is two bytes or more. -/
-theorem untypedSplit_parented (hm : 2 ≤ m.regionMin) (h : Parented m s) (hf : Forest s) {t u : Nat} {c : Cap}
+theorem untypedSplit_parented (hm : 2 ≤ m.regionMin) (h : Parented s) (hf : Forest s) {t u : Nat} {c : Cap}
     {r : List Nat} {outs : List Outcome} (hc : s.cap? u = some c) (hty : c.type = capUntyped)
-    (hh : untypedSplit m s t u c r = .ok (some outs)) : ∀ o ∈ outs, Parented m o.st := by
+    (hh : untypedSplit m s t u c r = .ok (some outs)) : ∀ o ∈ outs, Parented o.st := by
   intro o ho
   obtain ⟨lo, hi, hlo, hhi, hne, hnapot, rfl⟩ := untypedSplit_ok hh
   obtain ⟨pow, aligned⟩ := napot_split _ _ _ hnapot
@@ -748,7 +726,7 @@ theorem untypedSplit_parented (hm : 2 ≤ m.regionMin) (h : Parented m s) (hf : 
   obtain ⟨sl, -, sh, -⟩ := split_halves (BitVec.ofNat 32 c.a) 0 pow hbig aligned
   -- Each half lies within the block: a half is no empty block at zero, being two bytes or more.
   have half : ∀ (st : State) (lower : Bool),
-      Derives m st ⟨capUntyped, c.rights, 0, (blockWord (if lower then blockBase (BitVec.ofNat 32 c.a)
+      Derives st ⟨capUntyped, c.rights, 0, (blockWord (if lower then blockBase (BitVec.ofNat 32 c.a)
         else blockBase (BitVec.ofNat 32 c.a) + blockSize (BitVec.ofNat 32 c.a) / 2)
         (blockSize (BitVec.ofNat 32 c.a) / 2)).toNat, 0⟩ c := by
     intro st lower
@@ -774,8 +752,8 @@ theorem untypedSplit_parented (hm : 2 ≤ m.regionMin) (h : Parented m s) (hf : 
 /-- Every modelled step keeps every node derived from its parent, and tables of the ABI's types:
 every outcome it names, a call stopped part way among them, where the smallest region is two bytes or more. -/
 theorem step_parented (m : Machine) (s : State) (e : Event) (outs : List Outcome) (hm : 2 ≤ m.regionMin)
-    (hf : Forest s) (hd : Derived s) (h : Parented m s) (hs : step m s e = some outs) :
-    ∀ o ∈ outs, Parented m o.st := by
+    (hf : Forest s) (hd : Derived s) (h : Parented s) (hs : step m s e = some outs) :
+    ∀ o ∈ outs, Parented o.st := by
   intro o ho
   rcases step_cases hs with ⟨_, rfl⟩ | ⟨t, op, r, slot, node, c, rfl, -, hc, hh⟩
   · exact one_parented h ho
@@ -802,7 +780,7 @@ from a state that holds them, every outcome a step names holds them too,
 where the smallest region is two bytes or more.
 -/
 theorem step_checked (m : Machine) (s : State) (e : Event) (outs : List Outcome) (hm : 2 ≤ m.regionMin)
-    (hn : Nested s) (hp : Parented m s) (hs : step m s e = some outs) : ∀ o ∈ outs, Nested o.st ∧ Parented m o.st :=
+    (hn : Nested s) (hp : Parented s) (hs : step m s e = some outs) : ∀ o ∈ outs, Nested o.st ∧ Parented o.st :=
   fun o ho => ⟨step_nested m s e outs hn hs o ho, step_parented m s e outs hm hn.forest hn.derived hp hs o ho⟩
 
 end Rvuos

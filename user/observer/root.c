@@ -287,8 +287,8 @@ int main(void)
         }
         if (bits & window_bit) {
             uint64_t at;
-            uint32_t hz, counter;
-            must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &at, &hz, &counter));
+            uint32_t hz;
+            must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &at, &hz));
             uint32_t ok = counter_read(TIMER3_BASE), bad = counter_read(TIMER4_BASE);
             say(&cout, "observer: at %u ok %u bad %u rssi %d of %u, best -%u\n", (uint32_t)at, ok - ok_before,
                 bad - bad_before, (int)sum, measured, best);

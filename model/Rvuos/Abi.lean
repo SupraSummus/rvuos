@@ -123,7 +123,6 @@ def shapeOf : Nat → Shape
   | 20 => ⟨capIrqLine, rightW, shapeA123⟩
   | 21 => ⟨capIrq, rightW, shapeA123 ||| shapeVaries⟩
   | 25 => ⟨capClock, rightR, 0⟩
-  | 26 => ⟨capClock, rightR, shapeA1⟩
   | 37 => ⟨capClock, rightW, shapeA1⟩
   | 28 => ⟨capTime, 0, shapeA123⟩
   | 29 => ⟨capTime, rightW, shapeA123⟩

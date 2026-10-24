@@ -184,7 +184,7 @@ what is left:
   `tools/mac-trace.py` refuses such a log, and `tools/esp32c6-gate.py` makes the run again
   and writes each loss into `build/esp32c6/gate/losses.txt`, the series to read the cause from.
 - The radio's `osi_now_us` asks the kernel, `OP_CLOCK_READ`, about 8 us a read;
-  a loop that reads it often, as the dump engine's waits do, would read the counter through `OP_CLOCK_FRAME` with a load,
+  a loop that reads it often, as the dump engine's waits do, would load the counter through `BOOT_CAP_COUNTER`,
   at the cost of a region.
 - Open work of the ESP32-C6's own MAC and station:
   The station is the driver's own, on hostap; `user/wifi/esp32c6/NOTES.md` says why.
@@ -317,7 +317,6 @@ what is left:
 
 ## ESP32-C5
 
-- The counter's frame faults when read, open decision 41, so `make BOARD=esp32c5 test` stops at the demo's "map the counter".
 - The modem, the radio and Wi-Fi: nothing yet, nor the devices beyond the four `board.h` lists,
   the board's LCD on the SPI among them, whose clocks and resets lie in PCR, the kernel's.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,

@@ -76,12 +76,12 @@ void ping_main(struct child_page *page)
         round_trip(p, packet);
     }
     uint64_t start, end;
-    uint32_t hz, counter;
-    rv_clock_read(p->clock, &start, &hz, &counter);
+    uint32_t hz;
+    rv_clock_read(p->clock, &start, &hz);
     for (uint32_t i = 0; i < p->rounds; i++) {
         round_trip(p, packet);
     }
-    rv_clock_read(p->clock, &end, &hz, &counter);
+    rv_clock_read(p->clock, &end, &hz);
     p->counts = (uint32_t)(end - start);
     p->hz = hz;
     child_stop(&p->c, PING_DONE);
@@ -114,12 +114,12 @@ void lend_main(struct child_page *page)
         lend_round(p);
     }
     uint64_t start, end;
-    uint32_t hz, counter;
-    rv_clock_read(p->clock, &start, &hz, &counter);
+    uint32_t hz;
+    rv_clock_read(p->clock, &start, &hz);
     for (uint32_t i = 0; i < p->rounds; i++) {
         lend_round(p);
     }
-    rv_clock_read(p->clock, &end, &hz, &counter);
+    rv_clock_read(p->clock, &end, &hz);
     p->counts = (uint32_t)(end - start);
     p->hz = hz;
     child_stop(&p->c, PING_DONE);

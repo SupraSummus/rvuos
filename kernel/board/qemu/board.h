@@ -51,17 +51,16 @@
 #define CLINT_MTIME    U32(0x0200bff8)
 #define CLINT_MTIMECMP U32(0x02004000)
 #define CLINT_MSIP     U32(0x02000000)
-
-/* The counter BOOT_CAP_CLOCK names: the CLINT's mtime. */
-#define COUNTER_ADDR CLINT_MTIME
 #define COUNTER_HZ   U32(10000000)
 
 /*
- * The devices the boot grants as frames from BOOT_CAP_DEVICES up: none.
- * QEMU's devices are the kernel's or the console, and the host build, which shares this board, has no hardware.
+ * The devices the boot grants as frames from BOOT_CAP_DEVICES up:
+ * the CLINT's 32 bytes that end with mtime, read only, for a program to read the counter with no call,
+ * a block on the host's machines too, whose grain is 32 bytes at most.
+ * QEMU's other devices are the kernel's or the console.
  */
-#define BOOT_DEVICES 0
-#define DEVICE_RANGE_LIST
+#define BOOT_DEVICES 1
+#define DEVICE_RANGE_LIST { CLINT_MTIME & ~U32(0x1f), U32(0x20), RIGHT_R },
 
 /* No further blocks of RAM beside the free RAM, which the ESP32-C6 has; see boot.c. */
 #define BOOT_RAM_BLOCKS 0

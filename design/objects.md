@@ -137,7 +137,7 @@ a thread's watch and a process's table slots are capabilities as a table holds t
 | `Print` | Writing into the kernel's log. No object. |
 | `Halt` | Halting the machine. No object. |
 | `Test` | Driving the machine as a test does: tracing, moving the clock, interrupting, preempting. No object. |
-| `Clock` | The machine's time, read with `RIGHT_R`, also through the counter's frame, and its watchdog, fed with `RIGHT_W`. No object. |
+| `Clock` | The machine's time, read with `RIGHT_R`, and its watchdog, fed with `RIGHT_W`. No object. |
 
 Every object's size follows from its type,
 a `CapTable` from its slot count and a `Thread` from its places,
@@ -348,7 +348,6 @@ A carve hangs below the frame or line it was carved from,
 a retype and a split below the Untyped they were made of,
 a derivation below its source,
 an installed region below the frame it was installed from,
-the counter's frame below the clock it was derived through,
 a process's table slot below the `CapTable` capability the process was made with or the table was mounted with,
 a thread's process below the `Process` capability the thread was made with,
 a thread's watch below the `Notification` capability it was set with,

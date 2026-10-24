@@ -59,7 +59,7 @@ if [ "$board_arch" = arm ]; then
 case "$scenario" in
 escape-execute-data | escape-jump-kernel) fault="exception=0x00000004 cfsr=0x00000001 pc=$addr addr=0x00000000" ;;
 escape-misaligned-load | escape-misaligned-store) fault="exception=0x00000004 cfsr=0x00000082 pc=$addr" ;;
-escape-store-kernel | escape-store-clock | escape-past-region)
+escape-store-kernel | escape-store-console | escape-past-region)
     fault="exception=0x00000004 cfsr=0x00000082 pc=$addr addr=$target" ;;
 escape-load-scs) fault="exception=0x00000005 cfsr=0x00008200 pc=$addr addr=$target" ;;
 # The core wrote no frame, so the pc is what the thread's last trap left, which the scenario names;
@@ -74,7 +74,7 @@ escape-execute-data | escape-jump-kernel) fault="mcause=0x00000001 mepc=$addr mt
 escape-csrr | escape-mret) fault="mcause=0x00000002 mepc=$addr" ;; # whatever mtval holds
 escape-misaligned-load) fault="mcause=$load_cause mepc=$addr" ;; # mtval is the board's
 escape-misaligned-store) fault="mcause=$store_cause mepc=$addr" ;; # mtval is the board's
-escape-store-kernel | escape-store-clock) fault="mcause=0x00000007 mepc=$addr mtval=$target_mtval" ;;
+escape-store-kernel | escape-store-console) fault="mcause=0x00000007 mepc=$addr mtval=$target_mtval" ;;
 escape-past-region) fault="mcause=0x00000005 mepc=$addr mtval=$target_mtval" ;;
 *) fail "unknown scenario" ;;
 esac

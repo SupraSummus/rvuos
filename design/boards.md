@@ -31,9 +31,8 @@ The kernel:
    starts the other cores, which idle until a thread is bound to their units, see "Cores",
    and drops to user mode into the root task.
 
-A device range is granted read and write, or read alone where a write could do harm, never execute,
-but for the ESP32-C6's window onto flash, read and execute;
-the counter read only,
+A device range is granted read and write, or read alone where a write could do harm, as a counter's, never execute,
+but for a ROM and the ESP32-C6's window onto flash, read and execute,
 and can never become a pool:
 it is a frame, and no Untyped covers it,
 because the kernel writes objects into a pool,
@@ -137,9 +136,10 @@ the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives,
 and its radio, which `user/thread/` drives in 802.15.4's mode and `user/observer/` in BLE's,
 with TIMER2 for what is shorter than a kernel's step, as the kernel's timer keeps TIMER0 and TIMER1,
 and TIMER3 and TIMER4, which routes wire to the radio;
-QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
-nor do the MPS2 boards yet.
-So on QEMU `BOOT_CAP_COUNT` is 21, the number the seeds and the corpus are written for.
+and every board whose core lets user mode load the clock's counter lists it, read only,
+`BOOT_CAP_COUNTER`, for a program that times with no call what the kernel does to it, as the demo does;
+QEMU and the MPS2 boards list that alone, and the ESP32-C5, whose core refuses user mode the CLINT, lists none.
+So on QEMU `BOOT_CAP_COUNT` is 22, the number the seeds and the corpus are written for.
 A device that is a bus master reaches whatever its driver points it at, so its frame is the machine's:
 the ESP32-C6's modem and the nRF52840's radio are those a board lists, each for a driver the root task trusts with all RAM,
 and the ESP32-C6's HP_SYSTEM, which gives the modem's dump engine a bank of SRAM; open decision 13.
@@ -237,13 +237,13 @@ So the install keeps such regions apart, see "Region slots",
 and the layout leaves a block between the log and the code and one between the data and the input.
 A program compiled for strict alignment meets neither half.
 
-**ESP32-C5** runs the escape suite, `make BOARD=esp32c5 escape`, and the demo up to the counter's frame, open decision 41,
-on Waveshare's ESP32-C5-LCD-1.47.
+**ESP32-C5** runs the escape suite and the demo, `make BOARD=esp32c5 test escape`, on Waveshare's ESP32-C5-LCD-1.47.
 It boots as the ESP32-C6 does, through the same runner, but its ROM finds the kernel at `0x2000` in flash, `FLASH_BOOT` in `board.h`.
 Its 384 KiB of SRAM are three blocks of 128 KiB: the kernel's and the root task's, the further block, and the free RAM.
 Its peripherals lie where the ESP32-C6's do; the two chips share their halt and their console in `esp32/`.
 Its core takes interrupts through a CLIC alone, see "Interrupt controller",
-and its CLINT is laid out as SiFive's, `mtime` at `0x2000BFF8`, which user mode may not read.
+and its CLINT is laid out as SiFive's, `mtime` at `0x2000BFF8`, which user mode may not read,
+so it lists no counter, and the demo skips what it times with loads of one.
 Besides the access permission management units, CPU_APM among them, which keep user mode from even fetching from SRAM,
 TEE controllers give each peripheral a read and a write bit per security mode, resetting to machine mode's alone,
 so user mode reads every peripheral as zero; the kernel turns the units off and grants every TEE bit to every mode.
@@ -324,7 +324,7 @@ The hardwired PMP entries leave every peripheral and the Non-secure bank of SIO 
 so the kernel fences them off, see "Physical Memory Protection",
 and a process reaches a peripheral only through a frame,
 and only where ACCESSCTRL lets user mode in too, which at reset it does for few.
-TIMER0 is opened, for the clock; `escape-store-clock` stores to it through no frame, and faults.
+The USB controller is opened, for the console; `escape-store-console` stores to it through no region, and faults.
 So are the devices of `DEVICE_RANGE_LIST`, which the boot also takes out of reset,
 and on Hazard3, whose user mode is Non-secure on the bus, every pin is opened to Non-secure access,
 without which IO_BANK0 and PADS_BANK0 show user mode none.
@@ -470,8 +470,8 @@ and a thread's sp must always leave 32 bytes below it in memory it may write, as
 SysTick, which every Cortex-M has, is the compare: a 24-bit down-counter,
 set for what is left before the compare and set again each time it fires until the counter reaches it,
 `kernel/arch/arm/systick.c`;
-the counter is the board's, since SysTick's own count lies in the System Control Space, which user mode never reaches,
-and a process reads the clock through its call or the counter's frame.
+the counter is the board's, which a board lists among its devices for a program to load too,
+since SysTick's own count lies in the System Control Space, which user mode never reaches.
 The NVIC is the controller: the line a trap enters on is active and no longer pending, so `irq_claim` hands it out first,
 and a line is unmasked with its stale pending state dropped, since the NVIC latches a level masked or not.
 

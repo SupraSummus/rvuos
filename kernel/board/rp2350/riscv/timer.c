@@ -3,8 +3,7 @@
  *
  * It counts the microsecond ticks board.c starts, and raises the machine timer interrupt
  * as a standard one does, so clint.c drives it.
- * TIMER0 counts the same ticks for the counter user mode reads, since only machine mode reaches mtime,
- * so the clock's rate is mtime's; see COUNTER_ADDR in board.h.
+ * TIMER0 counts the same ticks, see COUNTER_ADDR in board.h, so the clock's rate is the same on either kind of core.
  */
 
 #include <stdint.h>
