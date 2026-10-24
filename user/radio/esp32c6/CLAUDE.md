@@ -80,8 +80,10 @@ A change to `kind=1`, `gaps=`, `hear=` or `user/radio/esp32c6/tools/demod154.py`
 `dsts=21124,21124,4660` and `hear=4` while the nRF52840 exchanges on channel 24 with `run=20` and `survey=0`,
 and `demod154.py LOG 16e6 -2e6` must read acknowledgements with sequence numbers 0 and 1 after the first two settings' pings,
 their FCS right, and none after the third's, as `hw/dump.md`, "Frames longer than a play, and the answer heard", says.
-A change to `muxes=` of `prog/player.c` runs it with `count=16383` and `muxes=1`: the seconds with the mux cleared must take some 1028 us,
+A change to `muxes=` of `prog/player.c` runs it with `count=16383` and `muxes=1`: the seconds with the mux cleared must take some 1030 to 1070 us,
 the others 414, as `hw/dump.md`, "A player", says.
+A change to `bits=` of `prog/player.c`, or to `play_second`, runs it with `count=4096` and `bits=380000,1080000,ff80000`:
+the seconds must take some 311, 1642 and 26116 us, three, sixteen and 255 passes, as `hw/dump.md`, "A player", says.
 A change to `slows=` of `prog/synth154.c` runs synth154 with `slows=0,1,1` and `amps=511,511,0` and `send=40`
 while the nRF52840 listens on channel 24 with `listen=15`: settings 0 and 1 must come about as often, setting 2 never.
 

@@ -7,8 +7,9 @@
  * The bank is filled with count= words, 4096 by default, up to the word's 14 bits:
  * a tone of period= words, 16 by default, amp= counts, 64 by default, its cosine in bits 10 to 19 and its sine in 0 to 9,
  * swap=1 the other way round, which is the player's I and Q; period=0 a constant amp= in both; ramp=1 dactrig's ramp.
- * Each second the word is written count=, bits=, in hexadecimal, and bit 31, and the time to its bit 18 told
- * beside the time a capture of as many words at 80 MHz takes.
+ * Each second the word is written count=, bits=, in hexadecimal, and bit 31, and the time to its bit 18 told,
+ * the shortest of three plays, beside the time a capture of as many words at 80 MHz takes;
+ * bits= may list words, one a second in turn, and bit 19 among them, with bits 20 to 27 a count of passes, see hw/dump.md.
  * loop=1 loops the transmitter back into the receiver meanwhile, lb= its gain, 0x20 by default, as prog/loopback.c does,
  * which radiates what the transmitter sends some 22 dB below the radio's 0 dBm, see hw/phy.md, "The loopback".
  * tone=, a step of the transmit tone generator's, drv_phy_tone in phy.c, has it on meanwhile, at the calibration's level.
@@ -63,6 +64,7 @@ DRV_PROGRAM("the player", DRV_NEED_DUMP);
 #define SRAM_UPPER   (1u << 16) /* HP_SYSTEM_MAC_DUMP_ALLOC, the bank's upper 64 KiB */
 #define UPPER_WORD   16384u
 #define POLLS_MAX    2000000u
+#define PLAY_TRIES   3u
 #define RHYTHM_MAX_S 60u
 #define ANSWER_US    100000u /* the rhythm answers the root task this often, well within its second */
 #define BAND_LOW_KHZ  2400500u /* the 2.4 GHz band's edges, half a MHz in */
@@ -270,8 +272,12 @@ static void play_second(uint32_t second, const struct play *p, const struct shap
         drv_phy_tone(1, tone, TONE_ATTEN);
         toned = 1;
     }
-    uint32_t usage = dump_bank_give();
-    uint32_t us = play(p);
+    /* The shortest of PLAY_TRIES, as the root task carrying the log's lines at the second's start may stretch a play. */
+    uint32_t usage = dump_bank_give(), us = NO_WORD;
+    for (uint32_t t = 0; t < PLAY_TRIES; t++) {
+        uint32_t one = play(p);
+        us = one < us ? one : us;
+    }
     dump_bank_take(usage);
     if (toned) {
         drv_phy_tone(0, 0, 0);
@@ -443,8 +449,8 @@ void drv_run(struct drv *d, struct self *own)
     p.count = config_number(d->conf, d->conf_len, "count", 4096);
     p.grab = config_number(d->conf, d->conf_len, "grab", 0);
     p.grabat = config_number(d->conf, d->conf_len, "grabat", 0);
-    uint32_t bits[LIST_MAX];
-    p.bits = hex_list(d, "bits", bits) != 0 ? bits[0] : 0;
+    uint32_t bits[LIST_MAX], nbits = hex_list(d, "bits", bits);
+    p.bits = nbits != 0 ? bits[0] : 0;
     s.period = config_number(d->conf, d->conf_len, "period", 16);
     s.amp = config_number(d->conf, d->conf_len, "amp", 64);
     s.ramp = config_number(d->conf, d->conf_len, "ramp", 0);
@@ -467,8 +473,9 @@ void drv_run(struct drv *d, struct self *own)
     uint32_t half = config_number(d->conf, d->conf_len, "half", 50);
     drv_must("a channel of 1 to 13", channel >= 1 && channel <= 13 ? ESP_OK : ESP_FAIL);
     drv_must("a count of 1 to PLAY_COUNT", p.count >= 1 && p.count <= PLAY_COUNT ? ESP_OK : ESP_FAIL);
-    drv_must("bits= none of the count's, bit 19's or bit 31's",
-             (p.bits & (PLAY_COUNT | PLAY_LOOP | PLAY_ENABLE)) == 0 ? ESP_OK : ESP_FAIL);
+    for (uint32_t k = 0; k < nbits; k++) {
+        drv_must("bits= none of the count's or bit 31's", (bits[k] & (PLAY_COUNT | PLAY_ENABLE)) == 0 ? ESP_OK : ESP_FAIL);
+    }
     drv_must("an amp of at most 511", s.amp <= 511 ? ESP_OK : ESP_FAIL);
     drv_must("a grab within the count", p.grab <= p.count ? ESP_OK : ESP_FAIL);
     drv_must("an at= and count= within the bank", e.at <= DUMP_SAMPLES_MAX - p.count ? ESP_OK : ESP_FAIL);
@@ -528,6 +535,7 @@ void drv_run(struct drv *d, struct self *own)
                     REG(CLK_CONF) = second % 2u ? clk & ~CLK_DUMP_MUX : clk | CLK_DUMP_MUX;
                     drv_say("player: the dump clock's mux %u\n", (REG(CLK_CONF) & CLK_DUMP_MUX) != 0);
                 }
+                p.bits = nbits != 0 ? bits[second % nbits] : 0;
                 play_second(second, &p, &s, loop, lb, tone, conf.hex);
                 REG(CLK_CONF) = clk;
             }

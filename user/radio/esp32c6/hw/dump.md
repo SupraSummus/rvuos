@@ -309,7 +309,7 @@ Read on channel 6 (measured, `prog/dacprobe.c`, no keys): `0x00` 0, `0x04` 0, `0
 | | 16 | nothing seen |
 | | 18 | set once the words are played |
 | | 19 | set, the player plays round and round and never sets bit 18 |
-| | 20 to 27 | nothing seen, where the C3's `dactrig` writes the count's low byte |
+| | 20 to 27 | with bit 19, the passes played back to back before bit 18 is set, 1 to 255; 0, round and round |
 | | 31 | the player on |
 | `0x600A9010` | 28, 29 | the first word played, in pages of 4096 words, 16 KiB: 0 to 3 |
 | | others | kept as written, nothing seen of bits 0 to 27 or 30 |
@@ -318,10 +318,19 @@ Read on channel 6 (measured, `prog/dacprobe.c`, no keys): `0x00` 0, `0x04` 0, `0
 
 - 16383 words take 414 us with bit 15 clear and 209 us with it set, as long as a capture of as many at 80 MHz takes;
   the bank's words are as they were afterwards.
+- With bit 19, bits 20 to 27 count the passes (measured, `prog/player.c`, `count=4096`, `bits=` 0x180000 to 0xFF80000,
+  most the shortest of three plays): 1, 2, 3, 4, 9, 10, 11, 12, 16, 32, 128 and 255 passes of 4096 words at 40 MS/s
+  took 107, 209, 311, 415, 926, 1028, 1131, 1233, 1642, 3281, 13112 and 26116 us, the passes' 102.4 us each and some 4 more,
+  and 255 at 80 MS/s 13060 us: so the passes follow on with less than a sample between them, a word played at 40 MS/s being 25 ns.
+  esp-sdr-zephyr's ESP32-C5 plays its repeat count so, where the C3's `dactrig` writes the count's low byte.
+  A play the second's first was stretched to some 960 us, whatever it held: the root task carries the log's lines then,
+  so `play_second` tells the shortest of three.
 - With `CLK_DATA_DUMP_MUX` cleared, a field ESP-IDF's `modem_syscon_reg.h` names and says no more of,
   the same 16383 words took 1028 us with bit 15 clear and 516 us with it set, and a capture of as many 517 us
   (`prog/player.c` with `muxes=1`, the mux cleared every other second, 414 and 209 us in the seconds between):
   the block's 80 MHz becomes 32 MHz, and the player plays at 80, 40, 32 or 16 MS/s, the poll's few microseconds aside.
+  On 2026-10-24 the same 16383 words with the mux cleared took 1060 to 1068 us, at 8c5d7512 and at b0279161 alike,
+  where the 80 MHz plays took 414 as before: the 32 MHz clock some 3.5 % slower than when it was measured, for a reason not known.
   The capture's rate bits, 15 and 16 of `0x600A9004`, written while the player plays, changed nothing of its 414 us
   (measured with a key since removed, b838fc85's run).
   None of the bits tried slows it, so with the BBPLL at 480 MHz 16 MS/s is its least (measured, `timebits=1`, 4096 words, 107 to 110 us);
