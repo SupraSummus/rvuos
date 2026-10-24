@@ -4,7 +4,7 @@
 # and lcd-sim renders what the glass shows, build/host/lcd/glass.png, and the controller's memory, memory.png,
 # for a person to hold beside the board. Only lcd-sim writes images, so only it links libpng.
 LCD_HOST   := build/host/lcd
-LCD_SHARED := $(LCD_HOST)/app.o $(LCD_HOST)/pattern.o $(LCD_HOST)/st7789.o $(LCD_HOST)/sim/panel.o
+LCD_SHARED := $(LCD_HOST)/app.o $(LCD_HOST)/pattern.o $(LCD_HOST)/stress.o $(LCD_HOST)/st7789.o $(LCD_HOST)/sim/panel.o
 
 $(LCD_HOST)/%.o: user/lcd/%.c
 	@mkdir -p $(dir $@)
@@ -16,11 +16,24 @@ $(LCD_HOST)/lcd-test: $(LCD_HOST)/sim/test.o $(LCD_SHARED)
 $(LCD_HOST)/lcd-sim: $(LCD_HOST)/sim/sim.o $(LCD_HOST)/sim/image.o $(LCD_SHARED)
 	$(HOST_CC) $(HOST_SAN) $^ -lpng -o $@
 
-.PHONY: lcd-test lcd-sim
+.PHONY: lcd lcd-test lcd-sim
+
+# The program on the board, its input LCD_CONFIG, words of key=value such as "scene=stress mhz=80 drive=0";
+# see user/lcd/root.c. It is written into the input region on every run, so no run reads an earlier one's.
+LCD_CONFIG ?= scene=pattern
+lcd: $(BUILD)/kernel-lcd.$(IMAGE)
+ifneq ($(BOARD),esp32c5)
+	$(error the LCD is Waveshare's ESP32-C5-LCD-1.47's: make BOARD=esp32c5 lcd)
+endif
+	printf '%s\n' "$(LCD_CONFIG)" > $(BUILD)/lcd.conf
+	$(BOOT_PREFIX) --timeout 15 --text $(call board_hex,INPUT_FLASH,kernel/board/$(BOARD)/board.h):$(BUILD)/lcd.conf $<
 lcd-test: $(LCD_HOST)/lcd-test
 	$<
 
+# LCD_SCENE and LCD_MHZ as the board's scene= and mhz=.
+LCD_SCENE ?= pattern
+LCD_MHZ   ?= 40
 lcd-sim: $(LCD_HOST)/lcd-sim
-	$< --memory $(LCD_HOST)/memory.png $(LCD_HOST)/glass.png
+	$< --scene $(LCD_SCENE) --mhz $(LCD_MHZ) --memory $(LCD_HOST)/memory.png $(LCD_HOST)/glass.png
 
 -include $(shell find $(LCD_HOST) -name '*.d' 2>/dev/null)

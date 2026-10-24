@@ -258,6 +258,7 @@ which a program divides further in SPI2's `SPI_CLOCK`, and the controller comes 
 Without the GDMA it sends only what the CPU writes into its 64-byte buffer, a transfer at a time.
 `user/lcd/` drives the LCD of Waveshare's board with it, an ST7789 of 172 by 320 pixels,
 and renders on the host, against a model of the LCD, what it shows: `make lcd-sim`.
+`make BOARD=esp32c5 lcd LCD_CONFIG="scene=stress mhz=80"` runs it on the board, its scene and its bus's clock as named.
 The flash's pins are in the IO MUX, so a program that holds it can cut the flash off, the root task's code with it,
 and so are the USB pins, which carry the console and the reset into the ROM's download mode.
 

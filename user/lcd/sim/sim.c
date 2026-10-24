@@ -2,7 +2,9 @@
  * The LCD's simulator: app.c run on the host against the model of the board's LCD, panel.c,
  * and what the glass shows written as a PNG, for a person to hold beside the board.
  *
- * Usage: lcd-sim [--scale n] [--memory file.png] [--every ms dir] glass.png
+ * Usage: lcd-sim [--scene name] [--mhz n] [--scale n] [--memory file.png] [--every ms dir] glass.png
+ *   --scene name       the scene app.c shows, "pattern" unless given, as the board's scene=
+ *   --mhz n            the bus's clock, 40 unless given, as the board's mhz=, which only the time depends on
  *   --scale n          each pixel a square of n by n, 2 unless given
  *   --memory file.png  the controller's whole memory, 240 by 320, with what the glass does not show dimmed,
  *                      which shows a picture that missed the glass
@@ -75,15 +77,21 @@ static void record(uint64_t now_ns)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: lcd-sim [--scale n] [--memory file.png] [--every ms dir] glass.png\n");
+    fprintf(stderr, "usage: lcd-sim [--scene name] [--mhz n] [--scale n] [--memory file.png] [--every ms dir] glass.png\n");
     exit(2);
 }
 
 int main(int argc, char **argv)
 {
     const char *glass = 0, *memory = 0;
+    int scene = APP_PATTERN;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
+        if (strcmp(argv[i], "--scene") == 0 && i + 1 < argc) {
+            i++;
+            scene = app_scene(argv[i], (uint32_t)strlen(argv[i]));
+        } else if (strcmp(argv[i], "--mhz") == 0 && i + 1 < argc) {
+            panel_bus_mhz((uint32_t)atoi(argv[++i]));
+        } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
             scale = (uint32_t)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--memory") == 0 && i + 1 < argc) {
             memory = argv[++i];
@@ -96,7 +104,7 @@ int main(int argc, char **argv)
             usage();
         }
     }
-    if (glass == 0 || scale < 1 || scale > 16 || (frames_dir != 0 && every_ns == 0)) {
+    if (glass == 0 || scene < 0 || scale < 1 || scale > 16 || (frames_dir != 0 && every_ns == 0)) {
         usage();
     }
 
@@ -104,7 +112,7 @@ int main(int argc, char **argv)
     if (frames_dir != 0) {
         panel_on_time(record);
     }
-    app_run();
+    app_run(scene);
     panel_on_time(0);
 
     uint64_t ns = panel_now_ns();

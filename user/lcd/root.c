@@ -9,8 +9,11 @@
  * It writes on the console what app.c took, its waits among them, in the core's cycles,
  * which the simulator's least time, the bus's alone, compares with.
  *
- * Build and run: make BOARD=esp32c5 build/esp32c5/kernel-lcd.bin
- *                tools/esp32c6-run.py --chip esp32c5 --port <port> --timeout 5 build/esp32c5/kernel-lcd.bin
+ * Its input region holds a configuration, words of key=value:
+ * scene= names app.c's scene, pattern unless given, mhz= the bus's clock, 40 or 80, and drive= its pins' drive, 0 to 3;
+ * see spi2.h. What it does not find it leaves at the default.
+ *
+ * Build and run: make BOARD=esp32c5 PORT=<port> lcd LCD_CONFIG="scene=stress mhz=80"
  * The pins are the ESP32-C5's, see user/board/esp32c5/devices.h; no other board builds it.
  * Once it has drawn it halts the machine with code 0, and the panel keeps the picture until the chip is reset.
  */
@@ -21,6 +24,7 @@
 #include "console.h"
 #include "devices.h"
 #include "app.h"
+#include "spi2.h"
 #include "rvuos.h"
 
 /* The root task's own slots, past the boot's. */
@@ -35,6 +39,7 @@ enum {
 #define REGION_IO_MUX  3
 #define REGION_GPIO    4
 #define REGION_SPI2    5
+#define REGION_INPUT   6
 
 #define BIT_TIMER 1u
 
@@ -75,6 +80,47 @@ void lcd_bus_sleep(uint32_t us)
     expect("wait for it", rv_wait(SLOT_NTFN, &bits));
 }
 
+/* The value of key= in the configuration of n bytes at conf, its first byte and its length in *len, or 0 if it has none. */
+static const char *config(const char *conf, uint32_t n, const char *key, uint32_t *len)
+{
+    uint32_t k = 0;
+    while (key[k] != '\0') {
+        k++;
+    }
+    for (uint32_t i = 0; i + k < n && conf[i] != '\0'; i++) {
+        uint32_t j = 0;
+        while (j < k && conf[i + j] == key[j]) {
+            j++;
+        }
+        if (j == k && conf[i + k] == '=' && (i == 0 || conf[i - 1] == ' ' || conf[i - 1] == '\n')) {
+            const char *v = conf + i + k + 1;
+            *len = 0;
+            while (v + *len < conf + n && v[*len] > ' ') {
+                (*len)++;
+            }
+            return v;
+        }
+    }
+    return 0;
+}
+
+static uint32_t config_number(const char *conf, uint32_t n, const char *key, uint32_t dflt)
+{
+    uint32_t len;
+    const char *v = config(conf, n, key, &len);
+    if (v == 0 || len == 0) {
+        return dflt;
+    }
+    uint32_t value = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        if (v[i] < '0' || v[i] > '9') {
+            return dflt;
+        }
+        value = value * 10 + (uint32_t)(v[i] - '0');
+    }
+    return value;
+}
+
 static uint32_t cycles(void)
 {
     uint64_t now;
@@ -98,9 +144,30 @@ int main(void)
     expect("carve a timer line", rv_irq_carve(BOOT_CAP_TIMER_LINES, 0, 1, SLOT_LINE));
     expect("bind the timer line", rv_irq_bind(SLOT_LINE, BOOT_CAP_POOL, SLOT_NTFN, SLOT_TIMER));
 
+    expect("input", rv_frame_info(BOOT_CAP_INPUT, &base, &size));
+    expect("map the input", rv_process_install(BOOT_CAP_PROCESS, REGION_INPUT, BOOT_CAP_INPUT, RIGHT_R));
+    const char *conf = (const char *)(uintptr_t)base;
+    uint32_t len;
+    const char *name = config(conf, size, "scene", &len);
+    int scene = name != 0 ? app_scene(name, len) : APP_PATTERN;
+    uint32_t mhz = config_number(conf, size, "mhz", 40) == 80 ? 80 : 40;
+    uint32_t drive = config_number(conf, size, "drive", 2) & 3u;
+    if (scene < 0) {
+        puts("lcd: no such scene, so the pattern\n");
+        scene = APP_PATTERN;
+    }
+    puts("lcd: scene ");
+    put_dec((uint32_t)scene);
+    puts(", bus at ");
+    put_dec(mhz);
+    puts(" MHz, drive ");
+    put_dec(drive);
+    puts("\n");
+
     lcd_bus_init();
+    spi2_configure(mhz, drive);
     uint32_t t0 = cycles();
-    app_run();
+    app_run(scene);
     uint32_t t1 = cycles();
 
     puts("lcd: drawn in ");

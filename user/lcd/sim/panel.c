@@ -16,7 +16,8 @@
  *   - that the glass is dark while the controller sleeps or its display is off, as this panel is black when not driven.
  * A fact the board shows to be otherwise moves the model, and a datasheet's fact it shows moves up to the board's.
  *
- * Time passes on the bus at 40 MHz, the board's, with no gap between bytes, which the board's CPU leaves;
+ * Time passes on the bus at the board's clock, 40 MHz unless panel_bus_mhz says otherwise,
+ * with no gap between bytes, which the board's CPU leaves;
  * so the model's time for a picture is the least the board takes.
  */
 
@@ -30,7 +31,6 @@
 
 #define GLASS_X0 34u /* the first column of memory the glass shows */
 
-#define NS_PER_BIT 25u /* 40 MHz */
 #define US         1000u
 #define MS         1000000u
 
@@ -66,6 +66,7 @@ static struct {
     uint64_t bytes;
     uint32_t errors;
     void (*hook)(uint64_t now_ns);
+    uint32_t mhz;
 
     int selected;
     int in_reset;
@@ -242,7 +243,9 @@ static void finish(void)
 
 void lcd_bus_init(void)
 {
+    uint32_t mhz = p.mhz != 0 ? p.mhz : 40;
     memset(&p, 0, sizeof(p));
+    p.mhz = mhz;
     /* The memory at power on: noise, which shows whatever a program leaves unwritten. */
     uint32_t seed = 0x2545f491u;
     for (uint32_t y = 0; y < MEMORY_H; y++) {
@@ -259,7 +262,7 @@ void lcd_bus_command(uint8_t code)
     finish();
     p.selected = 1;
     p.bytes++;
-    pass(8 * NS_PER_BIT);
+    pass(8000u / p.mhz);
     if (p.in_reset) {
         error("command 0x%02x while the controller is held in reset", code);
     }
@@ -288,7 +291,7 @@ void lcd_bus_command(uint8_t code)
 void lcd_bus_data(const uint8_t *bytes, uint32_t n)
 {
     p.bytes += n;
-    pass((uint64_t)n * 8 * NS_PER_BIT);
+    pass((uint64_t)n * 8000u / p.mhz);
     if (!p.selected || p.command == 0) {
         error("%u bytes of data with no command they belong to", n);
         return;
@@ -402,4 +405,9 @@ uint64_t panel_bytes(void)
 void panel_on_time(void (*hook)(uint64_t now_ns))
 {
     p.hook = hook;
+}
+
+void panel_bus_mhz(uint32_t mhz)
+{
+    p.mhz = mhz;
 }

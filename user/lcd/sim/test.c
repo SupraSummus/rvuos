@@ -83,7 +83,7 @@ static void wake_without(uint8_t skip)
 int main(void)
 {
     lcd_bus_init();
-    app_run();
+    app_run(APP_PATTERN);
     expect_errors(0, "the program");
     expect_pixel(0, 0, RED, "the red band, outside the frame");
     expect_pixel(1, 1, WHITE, "the frame's top left");
@@ -94,6 +94,20 @@ int main(void)
     expect_pixel(86, 200, BLUE, "the blue band");
     expect_pixel(86, 245, BLACK, "the darkest grey");
     expect_pixel(86, 315, WHITE, "the lightest grey");
+
+    lcd_bus_init();
+    app_run(APP_STRESS);
+    expect_errors(0, "the stress pattern");
+    expect_pixel(0, 0, 0x0000ffu, "the gradient's top left, no red, no green, all blue");
+    expect_pixel(171, 79, 0xffff00u, "the gradient's bottom right, all red and green, no blue");
+    expect_pixel(4, 83, WHITE, "the grid's first square");
+    expect_pixel(3, 83, BLACK, "beside the grid's first square");
+    expect_pixel(0, 160, 0xad5552u, "the checkerboard's 0xaaaa");
+    expect_pixel(1, 160, 0x52aaadu, "the checkerboard's 0x5555");
+    expect_pixel(86, 160, WHITE, "the checkerboard's white");
+    expect_pixel(87, 160, BLACK, "the checkerboard's black");
+    expect_pixel(3, 319, WHITE, "the first stripe");
+    expect_pixel(4, 319, RED, "the second stripe");
 
     wake_without(0);
     expect_errors(0, "the model's own wake");

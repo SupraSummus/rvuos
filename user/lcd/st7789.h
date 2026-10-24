@@ -29,4 +29,14 @@ void st7789_init(void);
 /* Fill the rectangle [x0, x1] by [y0, y1] of the panel with one colour. */
 void st7789_fill(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1, uint16_t colour);
 
+/*
+ * Write the rectangle [x0, x1] by [y0, y1] of the panel pixel by pixel, row by row:
+ * st7789_begin opens it, st7789_pixels sends n bytes of pixels, two a pixel, the high byte first,
+ * as many times as it takes, and st7789_end closes it.
+ * A buffer aligned to four bytes goes out fastest; see bus.h.
+ */
+void st7789_begin(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1);
+void st7789_pixels(const uint8_t *bytes, uint32_t n);
+void st7789_end(void);
+
 #endif

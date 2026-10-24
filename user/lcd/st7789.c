@@ -76,3 +76,19 @@ void st7789_fill(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1, uint16_t co
     }
     lcd_bus_end();
 }
+
+void st7789_begin(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1)
+{
+    window(x0, y0, x1, y1);
+    lcd_bus_command(ST_RAMWR);
+}
+
+void st7789_pixels(const uint8_t *bytes, uint32_t n)
+{
+    lcd_bus_data(bytes, n);
+}
+
+void st7789_end(void)
+{
+    lcd_bus_end();
+}

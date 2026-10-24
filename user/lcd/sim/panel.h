@@ -10,7 +10,7 @@
  * and it checks the datasheet's rules of order and timing, each broken one an error;
  * see panel.c for what is modelled, and which of it the board has confirmed.
  *
- * Time is simulated: it passes with each byte on the bus, at the board's 40 MHz, and with each sleep.
+ * Time is simulated: it passes with each byte on the bus, at the board's clock, and with each sleep.
  */
 
 #include <stdint.h>
@@ -33,6 +33,9 @@ uint32_t panel_errors(void);
 /* The simulated time since lcd_bus_init, in nanoseconds, and the bytes sent on the bus. */
 uint64_t panel_now_ns(void);
 uint64_t panel_bytes(void);
+
+/* The bus's clock, 40 MHz unless set, which lcd_bus_init keeps. */
+void panel_bus_mhz(uint32_t mhz);
 
 /* Called whenever simulated time passes, with the time it has reached, for a recorder of frames; 0 for none. */
 void panel_on_time(void (*hook)(uint64_t now_ns));
