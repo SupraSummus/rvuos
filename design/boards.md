@@ -5,7 +5,7 @@ Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and
 ## Boot
 
 The image contains the kernel followed by the root task.
-How it reaches RAM is the board's; see "Boards".
+How it reaches memory is the board's; see "Boards".
 The kernel:
 
 1. makes the board ready, which on the ESP32-C6 means watchdogs off
@@ -38,6 +38,8 @@ it is a frame, and no Untyped covers it,
 because the kernel writes objects into a pool,
 which on a device would drive its registers from machine mode.
 The two Untypeds the root task starts with cover RAM and nothing else.
+Where a board places the root task's code and input in flash, outside RAM, as the ESP32-C6 does,
+their frames are roots of their own, as a device's are, and the root task's memory holds its data and the boot pool alone.
 
 Every range the root task is granted is a block,
 so a board lays RAM out in blocks and what lies in none of them stays unused.
@@ -160,20 +162,27 @@ so a trap on one hart may wait that long for the other,
 and the demo checks only that the second core answers before a timer, not how soon.
 
 **ESP32-C6** runs the demo root task and its transcript check, `make test BOARD=esp32c6`.
-The chip's ROM loads the image's segments into SRAM over USB and enters it,
-so nothing is written to flash; `tools/esp32c6-run.py` drives that.
-Everything the image carries must lie below `0x4086ad08`,
-where the ROM keeps its buffers while it loads;
-the kernel takes all 512 KiB once it runs, laid out as `manual/targets.md` shows.
+The chip boots from flash, with no bootloader of Espressif's and no partition table:
+its ROM loads the kernel, behind Espressif's header at the flash's start, into SRAM and enters it,
+and the root task's code and input lie in flash, which the kernel maps through the cache's MMU,
+where the root task's code runs; `tools/esp32c6-run.py` writes the flash, and only what it does not hold already.
+The kernel runs from RAM, since it is on the path of every trap:
+from flash it would take its code through the chip's cache of 32 KiB, which a program's code from flash shares,
+and the Wi-Fi station's frames cost several times the cycles they cost with the kernel in RAM.
+Whether a program runs from flash is the program's: one that would rather not copies itself into RAM.
+The kernel takes all 512 KiB of SRAM once it runs, laid out as `manual/targets.md` shows.
 The console is the chip's USB Serial/JTAG controller,
-a CDC-ACM port on its own USB connector.
+a CDC-ACM port on its own USB connector, which also resets the chip into the ROM's download mode,
+in hardware, whatever the flash holds, so a kernel that hangs at boot costs nothing but a write of the flash.
 The ROM leaves the SAR ADC's registers in reset, where every write is dropped, and its clocks off;
 the kernel takes it out and starts them, since `board.h` lists it.
-The kernel maps 1 MiB of the flash through the cache's MMU at `0x42000000`, a window `board.h` places,
-which `tools/esp32c6-run.py` attaches before the jump, as a bootloader does;
-the Wi-Fi system's driver, too large for the SRAM, is to run from it.
-The ROM sets no clock, and the reset into its download mode keeps whatever the flash's last program set,
-so a run's costs would depend on what the flash holds:
+The kernel maps the image's first MiB of flash at `0x42800000` and the window onto flash, 1 MiB from `0x210000`, at `0x42000000`,
+the MMU's only valid entries;
+the Wi-Fi system's driver, too large for the SRAM, runs from the window.
+The ROM boots the flash as dual I/O, as the image's header asks, and leaves the cache reading it so,
+with the flash's clock at half its source.
+The ROM sets no clock, and a reset keeps whatever the last program set,
+so a run's costs would depend on what ran before:
 the kernel sets 160 MHz, and the boot's log says the clock it set and the one it found.
 The ROM's delay counts by the clock the ROM found, so a program that calls it tells it the clock's rate first.
 Before anything else the kernel turns off the four watchdogs the ROM leaves running,

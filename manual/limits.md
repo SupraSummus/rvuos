@@ -58,8 +58,8 @@ These are documented gaps, not surprises;
   the first core takes every device interrupt;
   `DESIGN.md`, open decision 24.
 - **ARM with no replay yet**, under QEMU and on RP2350's Cortex-M33; `TODO.md`.
-- **No boot from flash.**
-  The ESP32-C6 and RP2350 run from RAM, loaded by their ROMs over USB.
+- **Boot from flash on the ESP32-C6 alone.**
+  RP2350 runs from RAM, loaded by its bootrom over USB, and the nRF52840 from RAM, loaded over SWD.
 - **No loader.**
   The image embeds one program, linked at fixed addresses;
   a second process runs code from the same region.

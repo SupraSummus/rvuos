@@ -49,12 +49,12 @@ The model needs Lean 4 through elan, which fetches the version `model/lean-toolc
 See `DESIGN.md`, "Properties" and "Verification",
 for what the tests check and why.
 
-An ESP32-C6 connected over USB runs the same demo from RAM,
-loaded by the chip's ROM, with nothing written to flash;
+An ESP32-C6 connected over USB runs the same demo,
+written into its flash and booted from there by the chip's ROM;
 this needs Espressif's `esptool`:
 
 ```
-make BOARD=esp32c6 run   # load the demo and print its console
+make BOARD=esp32c6 run   # write the demo into flash, boot it and print its console
 make BOARD=esp32c6 test  # the same, and check the transcript
 ```
 

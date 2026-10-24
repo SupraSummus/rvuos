@@ -9,8 +9,8 @@
  * which runs at 16 MHz off the crystal whatever the CPU clock is.
  *
  * The kernel sets the CPU clock here, before measuring it, rather than keep the one it finds:
- * the ROM sets none, and the reset into its download mode keeps PCR's, as measured on the chip,
- * so it is whatever the flash's last program left, 80 MHz after an ESP-IDF bootloader with no application.
+ * the ROM sets none, and a reset keeps PCR's, as measured on the chip,
+ * so it is whatever the last program left, 80 MHz after an ESP-IDF bootloader with no application.
  * 160 MHz is the SPLL's 480 divided by three, and the AHB and APB a quarter of that, as the bootloader leaves them.
  * The SPLL needs no start: the USB Serial/JTAG controller, the console's and the loader's, runs on it,
  * as ESP-IDF's rtc_clk.c counts it among the PLL's users.

@@ -87,9 +87,9 @@ any word of a frame is an end, an event or a task alike.
 
 #### ESP32-C6
 
-The chip's ROM loads the image into SRAM over its USB port and enters it;
-nothing is written to flash, and booting from flash is not supported yet.
-The same port carries the console.
+The chip boots from flash: its ROM loads the kernel into SRAM and enters it,
+and the root task's code runs from flash, through the cache.
+`tools/esp32c6-run.py` writes the image into flash over the chip's USB port, and the same port carries the console.
 
 Memory map:
 
@@ -98,16 +98,32 @@ Memory map:
 | `0x20001C08` | 8 B | the CLINT's `UTIME`, a read-only copy of `mtime` at the CPU clock, 160 MHz, through `BOOT_CAP_CLOCK` |
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
 | `0x42000000` | 1 MiB | the window onto flash, from `0x210000` in it, through the cache; see below |
-| `0x40800000` to `0x4081E000` | 120 KiB | kernel code, data and stack |
-| `0x4081E000` | 4 KiB | the kernel log: a 32-byte header and the ring |
-| `0x4081F000` | 4 KiB | unused, so that the log does not touch the code |
-| `0x40820000` | 128 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
-| `0x40820000` | 64 KiB | root task code, read and execute |
-| `0x40830000` | 32 KiB | root task data and stack, read and write |
-| `0x40838000` | 4 KiB | unused, so that the data does not touch the input |
-| `0x40839000` | 4 KiB | input region, read only; nothing fills it yet |
-| `0x4083A000` | 4 KiB | the boot pool |
+| `0x42840000` | 256 KiB | root task code, read and execute, from `0x40000` in flash |
+| `0x42880000` | 4 KiB | input region, read only, from `0x80000` in flash, where `tools/esp32c6-run.py --text` writes a configuration |
+| `0x40800000` to `0x4080F000` | 60 KiB | kernel code, data and stack |
+| `0x4080F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x40810000` | 64 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the two ranges below and makes nothing more |
+| `0x40810000` | 32 KiB | root task data and stack, read and write |
+| `0x40818000` | 4 KiB | the boot pool |
+| `0x40820000` | 128 KiB | unused |
 | `0x40840000` | 256 KiB | free RAM, granted to the root task as an Untyped with all rights |
+
+The code and input regions lie in flash, outside the root task's memory,
+so their frames hang below nothing, as a device's do.
+The root task's code runs from flash through the chip's cache of 32 KiB, which the window onto flash shares;
+a program that would rather run from RAM copies itself there.
+
+The flash, 4 MiB on the XIAO ESP32-C6, holds the image the build makes, `build/esp32c6/kernel-<program>.bin`, from 0:
+
+| Offset | What |
+|---|---|
+| `0x0` | the kernel, behind Espressif's header, which the ROM loads into SRAM |
+| `0x40000` | the root task's code |
+| `0x80000` | the root task's input |
+| `0x210000` | the window onto flash, 1 MiB |
+
+No partition table or bootloader of Espressif's is left: the ROM boots the kernel itself.
+The header tells the ROM to read the flash as dual I/O, and the ROM leaves the cache reading it so.
 
 Interrupt lines:
 
@@ -148,10 +164,13 @@ a PHY driver leaves out its own writes there, as `user/radio/esp32c6/phy.c` does
 The pins are as the ROM leaves them, for a program to set as its board wires them.
 On the XIAO ESP32-C6, GPIO3 low powers the RF switch between the chip and its two antennas,
 and GPIO14 picks the antenna on the board, low, or the U.FL connector, high, as the Wi-Fi system's root task sets them.
-The flash's pins, GPIO24 to GPIO30, are in the IO MUX too, so a program that holds it can cut the window onto flash off.
+The flash's pins, GPIO24 to GPIO30, are in the IO MUX too, so a program that holds it can cut the flash off,
+the root task's code and the window onto flash with it;
+and so are the USB pins, GPIO12 and GPIO13, which carry the console and the reset into the ROM's download mode,
+which the chip's BOOT button gives too.
 The modem's clocks are off, in MODEM_SYSCON and MODEM_LPCON, for a driver to turn on.
-The window onto flash shows 1 MiB of the flash from `0x210000`, which the usual partition table gives to a file system;
-`esptool write-flash 0x210000 <image>` puts a program there, and nothing else in rvuos writes the flash.
+The window onto flash shows 1 MiB of the flash from `0x210000`, past the image;
+`tools/esp32c6-run.py --flash 0x210000:<image>` puts a program there, and nothing but that tool writes the flash.
 
 A device's interrupt reaches its `Irq` only while the device itself has it enabled,
 in the USB Serial/JTAG controller's case in its `INT_ENA` register.
@@ -431,15 +450,16 @@ On the ESP32-C6, connected over USB:
 
 ```
 make BOARD=esp32c6                    # build/esp32c6/kernel-init.bin
-make BOARD=esp32c6 run                # load it into RAM and print the console until the halt
+make BOARD=esp32c6 run                # write it into flash, boot it and print the console until the halt
 make BOARD=esp32c6 test               # the same, and check the transcript
 make BOARD=esp32c6 escape lib-test    # the escape suite, and the library's test
 make BOARD=esp32c6 bench              # what a system call and a switch cost, in the core's cycles
 make BOARD=esp32c6 PORT=/dev/ttyACM1 run
 ```
 
-Opening the port resets the chip,
-so `tools/esp32c6-run.py` loads the image and reads the console on one connection.
+Opening the port resets the chip into the ROM's download mode,
+where `tools/esp32c6-run.py` writes into flash what it does not hold already,
+then resets the chip to boot from flash and reads the console on the same connection.
 The replay driver is QEMU's alone for now.
 
 On RP2350, in BOOTSEL mode, as it is when plugged in with BOOTSEL held and again after each run:

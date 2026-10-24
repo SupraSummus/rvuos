@@ -761,7 +761,7 @@
 #define BOOT_CAP_CODE      6 /* Frame: the root task's code, read and execute */
 #define BOOT_CAP_DATA      7 /* Frame: the root task's data and stack */
 #define BOOT_CAP_FREE_RAM  8 /* Untyped: the block of RAM the board sets aside for the root task */
-#define BOOT_CAP_INPUT     9 /* Frame, read only: test input the loader placed in RAM */
+#define BOOT_CAP_INPUT     9 /* Frame, read only: test input the loader placed in RAM, or flash */
 #define BOOT_CAP_IRQ_LINES 10 /* IrqLine: LOG_IRQ_LINE and every line of the interrupt controller */
 #define BOOT_CAP_UART      11 /* Frame, read and write: the board's UART registers */
 #define BOOT_CAP_LOG       12 /* Frame, read and write: the kernel's log, see struct rvuos_log */
@@ -769,8 +769,8 @@
 #define BOOT_CAP_CLOCK     14 /* Clock: the machine's counter */
 #define BOOT_CAP_TIME      15 /* Time: every unit of every core, with RIGHT_W and RIGHT_X; the root thread earns the first core's */
 /*
- * Untyped: the block of RAM the root task lives in, which holds its code, data and input
- * and the boot pool's block; all of it is made already, so it makes nothing
+ * Untyped: the block of RAM the root task lives in, which holds its data, its code and input but where a board
+ * places those in flash, and the boot pool's block; all of it is made already, so it makes nothing
  * until those are gone, and the root task, which runs on it, cannot revoke below it.
  */
 #define BOOT_CAP_ROOT_RAM  16

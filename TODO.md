@@ -127,9 +127,13 @@ what is left:
 
 ## ESP32-C6
 
-- Boot from flash, and with it whether the ROM can load the image
-  straight from offset 0 or Espressif's second-stage bootloader must run first,
-  and whether execute-in-place goes through a cache the kernel must control.
+- The flash is read as the ROM boots it, dual I/O with its clock at half its source.
+  Quad I/O, or the whole clock with the delays it needs, would make each of the cache's misses cheaper,
+  for the root task's code and the window onto flash alike; ESP-IDF's second stage sets both, the ROM neither.
+- The root task's code runs from flash, which costs the Wi-Fi station a fifth more cycles a frame than from RAM,
+  since the network process runs the root task's code too, and the driver's in the window shares the cache with it.
+  Nothing copies a program's code into RAM yet: a link of its hot functions into its data, which its start copies,
+  or the ROM's cache locks, `Cache_Lock_Addr`, which keep lines in the cache, would.
 - What the ROM overwrites in RAM on a reset, for open decision 12.
 - Try user mode on the rest of the user-level CSR space, here and on QEMU;
   only the CSRs the TRM lists and `0x800` to `0x802` were tried.
@@ -662,8 +666,8 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   which only `OP_TEST_PREEMPT` arms, under tracing; `SELFCHECK=0` could drop it too.
 - The root task is granted one block of free RAM,
   so what lies between the blocks is unused:
-  about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.
-  So is the root task's own memory past the boot pool, 60 KiB on QEMU and 20 KiB on the ESP32-C6,
+  about 2.8 MiB on QEMU, where it does not matter, and 128 KiB and some of the kernel's 60 KiB on the ESP32-C6.
+  So is the root task's own memory past the boot pool, 60 KiB on QEMU and 28 KiB on the ESP32-C6,
   until the root task is gone; open decision 20 in `DESIGN.md`.
   Grant the rest as further blocks, or lay the board out afresh,
   when a board's RAM gets tight.

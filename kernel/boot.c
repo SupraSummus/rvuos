@@ -17,6 +17,7 @@ struct granted_range boot_granted[GRANTED_RANGES];
  * are made of its memory, BOOT_CAP_ROOT_RAM, and hang right below it,
  * as they would once a loader had split that memory down to them
  * and deleted the halves between; the boot leaves nothing more.
+ * Code and input a board places in flash are no RAM's, and are roots of their own, as a device's frame is.
  * The boot pool hangs below its block as a retype would have put it,
  * so a revoke there destroys the root task and leaves its code where it is.
  */
@@ -46,6 +47,9 @@ struct thread *boot_create_root(void)
     boot_granted[2] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
     /* The kernel's log; the reader writes its mark into the header. Never a pool: a frame no Untyped covers. */
     boot_granted[3] = (struct granted_range){ KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
+    /* The root task's code and input, granted wherever they lie, in its memory or in flash. */
+    boot_granted[GRANT_CODE] = (struct granted_range){ USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X };
+    boot_granted[GRANT_INPUT] = (struct granted_range){ INPUT_BASE, INPUT_SIZE, RIGHT_R };
     /* The counter's low word, read only, in the smallest block that holds it; see OP_CLOCK_FRAME. */
     uint32_t counter_size = region_min_size();
     boot_granted[GRANT_COUNTER] =
@@ -70,9 +74,8 @@ struct thread *boot_create_root(void)
     if (!napot_block(BOOT_POOL_BASE, BOOT_POOL_SIZE)) {
         kpanic("boot layout is not made of NAPOT blocks");
     }
-    /* The root task's own frames are blocks too, as every frame is, so that one word names each. */
-    if (!napot_block(USER_CODE_BASE, USER_CODE_SIZE) || !napot_block(USER_DATA_BASE, USER_DATA_SIZE) ||
-        !napot_block(INPUT_BASE, INPUT_SIZE)) {
+    /* The root task's data is a block too, as every frame is, so that one word names it; its code and input are grants. */
+    if (!napot_block(USER_DATA_BASE, USER_DATA_SIZE)) {
         kpanic("boot layout is not made of NAPOT blocks");
     }
     struct cap ram = cap_to_untyped(ROOT_RAM_BASE, ROOT_RAM_SIZE, RIGHT_ALL);
@@ -129,7 +132,8 @@ struct thread *boot_create_root(void)
         }
         bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
                       i == BOOT_CAP_POOL;
-        bool own = i == BOOT_CAP_CODE || i == BOOT_CAP_DATA || i == BOOT_CAP_INPUT;
+        bool own = (i == BOOT_CAP_CODE && IN_ROOT_RAM(USER_CODE_BASE, USER_CODE_SIZE)) || i == BOOT_CAP_DATA ||
+                   (i == BOOT_CAP_INPUT && IN_ROOT_RAM(INPUT_BASE, INPUT_SIZE));
         if (cap_store(table, i, &boot[i], pooled ? &pool->node : own ? root_ram : NULL) != KERR_OK) {
             kpanic("cannot fill the root task's table");
         }

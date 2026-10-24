@@ -29,7 +29,7 @@
  * The pins stay as the ROM leaves them: how a board wires them, as the XIAO ESP32-C6 does its RF switch,
  * is for a program to set, through the IO MUX and the GPIO matrix board.h lists.
  *
- * The window onto flash, see board.h, is the MMU's only valid entries, the window's 64 KiB pages in order,
+ * The MMU's only valid entries are the image's 64 KiB pages and the window's, see board.h, each run in order,
  * which the kernel sets, with the cache emptied of what the pages held before, then lets the cache's buses through.
  *
  * The core has user-mode traps, the N extension,
@@ -86,6 +86,7 @@
 /* The MMU, which maps 64 KiB pages of flash through the cache from 0x42000000, one entry each, and the cache. */
 #define MMU_ITEM_CONTENT     0x6000237Cu
 #define MMU_ITEM_INDEX       0x60002380u
+#define MMU_BASE             0x42000000u
 #define MMU_ENTRIES          256u
 #define MMU_PAGE             0x10000u
 #define MMU_VALID            (1u << 9)
@@ -97,14 +98,35 @@
 #define EXTMEM_INVALIDATE    (1u << 0)
 #define EXTMEM_SYNC_DONE     (1u << 4)
 
-_Static_assert(FLASH_WINDOW_BASE % (MMU_PAGE * MMU_ENTRIES) == 0, "the window starts the MMU's address space");
-_Static_assert(FLASH_WINDOW_FLASH % MMU_PAGE == 0 && FLASH_WINDOW_SIZE % MMU_PAGE == 0, "the window is whole pages");
+_Static_assert(FLASH_WINDOW_BASE % MMU_PAGE == 0 && FLASH_WINDOW_FLASH % MMU_PAGE == 0 &&
+                   FLASH_WINDOW_SIZE % MMU_PAGE == 0,
+               "the window is whole pages");
+_Static_assert(FLASH_IMAGE_BASE % MMU_PAGE == 0 && FLASH_IMAGE_SIZE % MMU_PAGE == 0 &&
+                   USER_CODE_FLASH + USER_CODE_SIZE <= INPUT_FLASH && INPUT_FLASH + INPUT_SIZE <= FLASH_IMAGE_SIZE,
+               "the image is whole pages, the root task's code and input in it");
+_Static_assert(FLASH_WINDOW_BASE >= MMU_BASE && FLASH_IMAGE_BASE >= FLASH_WINDOW_BASE + FLASH_WINDOW_SIZE &&
+                   FLASH_IMAGE_BASE + FLASH_IMAGE_SIZE <= MMU_BASE + MMU_PAGE * MMU_ENTRIES &&
+                   FLASH_IMAGE_SIZE <= FLASH_WINDOW_FLASH,
+               "the window and the image lie apart in the MMU's space and in flash");
 
-static void flash_window_map(void)
+/* The flash page entry i of the MMU shows, or 0 for none. */
+static uint32_t mmu_item(uint32_t i)
+{
+    uint32_t at = MMU_BASE + i * MMU_PAGE;
+    if (at - FLASH_WINDOW_BASE < FLASH_WINDOW_SIZE) {
+        return MMU_VALID | (FLASH_WINDOW_FLASH + (at - FLASH_WINDOW_BASE)) / MMU_PAGE;
+    }
+    if (at - FLASH_IMAGE_BASE < FLASH_IMAGE_SIZE) {
+        return MMU_VALID | (at - FLASH_IMAGE_BASE) / MMU_PAGE;
+    }
+    return 0;
+}
+
+static void flash_map(void)
 {
     for (uint32_t i = 0; i < MMU_ENTRIES; i++) {
         REG(MMU_ITEM_INDEX) = i;
-        REG(MMU_ITEM_CONTENT) = i < FLASH_WINDOW_SIZE / MMU_PAGE ? MMU_VALID | (FLASH_WINDOW_FLASH / MMU_PAGE + i) : 0;
+        REG(MMU_ITEM_CONTENT) = mmu_item(i);
     }
     /* A size of zero empties the whole cache. */
     REG(EXTMEM_SYNC_ADDR) = 0;
@@ -145,7 +167,7 @@ void board_init(void)
     REG(PMU_IMM_HP_CK_POWER) = PMU_TIE_HIGH_XPD_BB_I2C;
     REG(LP_AON_SAR_CCT) = (REG(LP_AON_SAR_CCT) & ~LP_AON_SAR2_PWDET_CCT) | LP_AON_SAR2_PWDET_CCT_4;
 
-    flash_window_map();
+    flash_map();
 }
 
 /*

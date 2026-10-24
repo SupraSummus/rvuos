@@ -707,17 +707,17 @@ and drops into user mode with:
 | 3 | `BOOT_CAP_THREAD` | the root task's first thread, with a place on every core, its first holding the first core's units | all |
 | 4 | `BOOT_CAP_POOL` | the boot pool | all |
 | 5 | `BOOT_CAP_PRINT` | `Print` | all |
-| 6 | `BOOT_CAP_CODE` | `Frame`: the root task's code | read, execute |
+| 6 | `BOOT_CAP_CODE` | `Frame`: the root task's code, in flash on the ESP32-C6 | read, execute |
 | 7 | `BOOT_CAP_DATA` | `Frame`: the root task's data and stack | read, write |
 | 8 | `BOOT_CAP_FREE_RAM` | `Untyped`: the block of RAM the board sets aside for the root task | all |
-| 9 | `BOOT_CAP_INPUT` | `Frame`: test input the loader placed in RAM | read |
+| 9 | `BOOT_CAP_INPUT` | `Frame`: test input the loader placed in RAM, or in flash on the ESP32-C6 | read |
 | 10 | `BOOT_CAP_IRQ_LINES` | `IrqLine`: line 0 (the log) and every controller line | write |
 | 11 | `BOOT_CAP_UART` | `Frame`: the board's console registers, a 16550 on QEMU, the USB Serial/JTAG controller on the ESP32-C6, the USB controller on RP2350 | read, write |
 | 12 | `BOOT_CAP_LOG` | `Frame`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's time and its watchdog | all |
 | 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of each core, the first core's all earned by the root task's thread | write, execute |
-| 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool's block, all made already | all |
+| 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool's block, all made already; on the ESP32-C6 its data and the boot pool's block alone, as the code and input lie in flash | all |
 | 17 | `BOOT_CAP_POOL_RAM` | `Untyped`: the boot pool's block, below `BOOT_CAP_ROOT_RAM`, made into the boot pool | all |
 | 18 | `BOOT_CAP_HALT` | `Halt` | all |
 | 19 | `BOOT_CAP_TEST` | `Test` | all |

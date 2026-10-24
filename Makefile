@@ -3,7 +3,7 @@
 #
 # BOARD selects kernel/board/<board>/ and user/board/<board>/:
 #   qemu     QEMU virt, RV32, the default, and with the two MPS2 boards what `make check` runs on
-#   esp32c6  an ESP32-C6, loaded into RAM through its ROM over USB
+#   esp32c6  an ESP32-C6, written into its flash over USB and booted from there by its ROM
 #   rp2350   an RP2350, loaded into RAM through its bootrom over USB,
 #            on its Hazard3 cores, or with ARCH=arm on its Cortex-M33 ones
 #   mps2-an385  QEMU's MPS2 with the AN385 image, a Cortex-M3; `make arm-test` runs its demo

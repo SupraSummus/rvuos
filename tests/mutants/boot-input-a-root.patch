@@ -10,12 +10,13 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -126,7 +126,7 @@ struct thread *boot_create_root(void)
+@@ -131,8 +131,7 @@ struct thread *boot_create_root(void)
          }
          bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
                        i == BOOT_CAP_POOL;
--        bool own = i == BOOT_CAP_CODE || i == BOOT_CAP_DATA || i == BOOT_CAP_INPUT;
-+        bool own = i == BOOT_CAP_CODE || i == BOOT_CAP_DATA;
+-        bool own = (i == BOOT_CAP_CODE && IN_ROOT_RAM(USER_CODE_BASE, USER_CODE_SIZE)) || i == BOOT_CAP_DATA ||
+-                   (i == BOOT_CAP_INPUT && IN_ROOT_RAM(INPUT_BASE, INPUT_SIZE));
++        bool own = (i == BOOT_CAP_CODE && IN_ROOT_RAM(USER_CODE_BASE, USER_CODE_SIZE)) || i == BOOT_CAP_DATA;
          if (cap_store(table, i, &boot[i], pooled ? &pool->node : own ? root_ram : NULL) != KERR_OK) {
              kpanic("cannot fill the root task's table");
          }

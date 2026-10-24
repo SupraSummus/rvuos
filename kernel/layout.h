@@ -32,20 +32,37 @@
 /* The boot pool, where the kernel builds the root task's objects. */
 #define BOOT_POOL_SIZE U32(0x00001000)
 
+/*
+ * Whether a range lies in the root task's memory, or outside RAM altogether, as in flash a board maps.
+ * The root task's code and input regions lie in either,
+ * and boot.c makes them of its memory only where they lie in it.
+ */
+#define IN_ROOT_RAM(base, size) (ROOT_RAM_BASE <= (base) && (base) + (size) <= ROOT_RAM_BASE + ROOT_RAM_SIZE)
+#define OUTSIDE_RAM(base, size) ((base) + (size) <= RAM_BASE || RAM_BASE + RAM_SIZE <= (base))
+
 #ifndef __ASSEMBLER__
-/* The root task's memory holds its code, data and input regions and the boot pool, in that order. */
-_Static_assert(ROOT_RAM_BASE <= USER_CODE_BASE && USER_CODE_BASE + USER_CODE_SIZE <= USER_DATA_BASE &&
-                   USER_DATA_BASE + USER_DATA_SIZE <= INPUT_BASE && INPUT_BASE + INPUT_SIZE <= BOOT_POOL_BASE &&
-                   BOOT_POOL_BASE % BOOT_POOL_SIZE == 0 &&
-                   BOOT_POOL_BASE + BOOT_POOL_SIZE <= ROOT_RAM_BASE + ROOT_RAM_SIZE,
-               "the root task's regions and the boot pool lie apart in its memory");
+/*
+ * The root task's memory holds its data region and the boot pool, in that order,
+ * and its code before the data and its input between the data and the pool, unless they lie outside RAM.
+ */
+_Static_assert(IN_ROOT_RAM(USER_DATA_BASE, USER_DATA_SIZE) && USER_DATA_BASE + USER_DATA_SIZE <= BOOT_POOL_BASE &&
+                   BOOT_POOL_BASE % BOOT_POOL_SIZE == 0 && IN_ROOT_RAM(BOOT_POOL_BASE, BOOT_POOL_SIZE),
+               "the root task's data and the boot pool lie apart in its memory");
+_Static_assert((IN_ROOT_RAM(USER_CODE_BASE, USER_CODE_SIZE) && USER_CODE_BASE + USER_CODE_SIZE <= USER_DATA_BASE) ||
+                   OUTSIDE_RAM(USER_CODE_BASE, USER_CODE_SIZE),
+               "the root task's code lies below its data in its memory, or outside RAM");
+_Static_assert((IN_ROOT_RAM(INPUT_BASE, INPUT_SIZE) && USER_DATA_BASE + USER_DATA_SIZE <= INPUT_BASE &&
+                INPUT_BASE + INPUT_SIZE <= BOOT_POOL_BASE) ||
+                   OUTSIDE_RAM(INPUT_BASE, INPUT_SIZE),
+               "the root task's input lies between its data and the boot pool in its memory, or outside RAM");
 #endif
 
 /*
  * The kernel's log, see klog.h: its header and a ring of KLOG_SIZE bytes,
  * one block at the top of the kernel's memory, right below the root task's code,
  * or a block lower where the log may not touch the code; see PMP_SPLIT_STORE_AS_READ in board.h.
- * A board whose free RAM lies between the kernel and the root task's memory places it in board.h.
+ * A board whose free RAM lies between the kernel and the root task's memory places it in board.h,
+ * as does one whose root task's code lies in flash.
  */
 #define KLOG_REGION_SIZE U32(0x00001000)
 #define KLOG_SIZE        (KLOG_REGION_SIZE - RVUOS_LOG_HEADER)

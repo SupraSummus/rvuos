@@ -20,7 +20,7 @@ WIFI_ESP_LIBS :=
 $(BUILD)/$(WIFI_ESP)/%.o: CFLAGS += -I$(RADIO_ESP)
 # WIFI_CONFIG names the network to join, ssid=, pass= and bssid=, from a file git does not track, as for the Pico 2 W,
 # and how long the run lasts, run= seconds, after which the root task halts, and the log comes out; see root.c.
-# With none the input region gets an empty one, since the board's RAM keeps the last run's.
+# With none the input region gets an empty one, since the flash keeps the last run's.
 
 # hostap's supplicant, the parts of wpa_supplicant's src/ that tools/esp-fetch.py --wifi unpacks:
 # the 4-way and group key handshakes of rsn_supp/, WPA3's SAE of common/, and the crypto of hostap's own they run on,

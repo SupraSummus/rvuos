@@ -2,36 +2,46 @@
 #define RVUOS_BOARD_H
 
 /*
- * ESP32-C6: where RAM and the root task lie, and which devices it has.
+ * ESP32-C6: where RAM, flash and the root task lie, and which devices it has.
  * Included through layout.h, which the linker scripts read as well.
  *
+ * The ROM boots from flash: it loads the kernel, behind Espressif's header at the flash's start, into SRAM
+ * and enters it at RAM_BASE in machine mode; see DESIGN.md, "Boards".
  * The 512 KiB of HP SRAM answer at one address for code and data.
- * The ROM loads the image's segments into it and enters at RAM_BASE in machine mode;
- * see DESIGN.md, "Boards".
- * While it loads, the ROM keeps its own buffers, stack and data from 0x4086ad08 up,
- * so everything the image carries must lie below that;
- * the kernel takes the whole of RAM once it runs.
- * The kernel owns [RAM_BASE, USER_CODE_BASE), but for the block below the root task's code.
- * The root task's memory follows, one block holding its code, data and input regions
- * and the boot pool its kernel objects live in,
- * and the upper half of RAM is handed to the root task as free RAM.
- * Each is a block aligned to its own size; what lies in none of them is left unused,
- * such as the blocks that keep the log off the code and the data off the input.
+ * The kernel owns [RAM_BASE, KLOG_BASE) and its log above it.
+ * The root task's memory follows, one block holding its data region and the boot pool its kernel objects live in;
+ * its code and input lie in flash, see FLASH_IMAGE_BASE.
+ * The upper half of RAM is handed to the root task as free RAM.
+ * Each is a block aligned to its own size; what lies in none of them is left unused.
  */
 #define RAM_BASE       U32(0x40800000)
 #define RAM_SIZE       U32(0x00080000)
-#define ROOT_RAM_BASE  U32(0x40820000)
-#define ROOT_RAM_SIZE  U32(0x00020000)
-#define USER_CODE_BASE U32(0x40820000)
-#define USER_CODE_SIZE U32(0x00010000)
-#define USER_DATA_BASE U32(0x40830000)
+#define KLOG_BASE      U32(0x4080F000)
+#define ROOT_RAM_BASE  U32(0x40810000)
+#define ROOT_RAM_SIZE  U32(0x00010000)
+#define USER_DATA_BASE U32(0x40810000)
 #define USER_DATA_SIZE U32(0x00008000)
-/* Nothing loads replay input here yet; the region keeps the root task's grants the same. */
-#define INPUT_BASE     U32(0x40839000)
-#define INPUT_SIZE     U32(0x00001000)
-#define BOOT_POOL_BASE U32(0x4083A000)
+#define BOOT_POOL_BASE U32(0x40818000)
 #define FREE_RAM_BASE  U32(0x40840000)
 #define FREE_RAM_SIZE  U32(0x00040000)
+
+/*
+ * The flash, 4 MiB on the XIAO ESP32-C6, whose first MiB the MMU shows page for page from FLASH_IMAGE_BASE.
+ * It holds the image: at 0 the kernel, which the ROM loads into RAM, behind Espressif's header,
+ * from USER_CODE_FLASH the root task's code region, read and execute, which runs from flash,
+ * and at INPUT_FLASH its input region, read only, which tools/esp32c6-run.py writes a configuration into.
+ * The MMU maps 64 KiB pages, which the kernel's board_init sets before the root task runs; see board.c.
+ * A program that would rather run from RAM copies itself there; the kernel runs from RAM,
+ * since every trap would otherwise take its code from the cache, where a program's own code from flash competes.
+ */
+#define FLASH_IMAGE_BASE  U32(0x42800000)
+#define FLASH_IMAGE_SIZE  U32(0x00100000)
+#define USER_CODE_FLASH   U32(0x00040000)
+#define USER_CODE_BASE    (FLASH_IMAGE_BASE + USER_CODE_FLASH)
+#define USER_CODE_SIZE    U32(0x00040000)
+#define INPUT_FLASH       U32(0x00080000)
+#define INPUT_BASE        (FLASH_IMAGE_BASE + INPUT_FLASH)
+#define INPUT_SIZE        U32(0x00001000)
 
 /*
  * A misaligned store checks its second word for reading unless a store follows it,
@@ -79,8 +89,7 @@
  * The window onto flash: FLASH_WINDOW_SIZE bytes of it from FLASH_WINDOW_FLASH,
  * which board.c maps through the cache at FLASH_WINDOW_BASE,
  * for a program too large for SRAM, such as the Wi-Fi system's driver, to run from.
- * The flash must be attached when the kernel starts, as tools/esp32c6-run.py leaves it.
- * The window lies in the 1.9 MiB the boards' usual partition table gives to a file system, unused here.
+ * It lies past the image's MiB.
  */
 #define FLASH_WINDOW_BASE  U32(0x42000000)
 #define FLASH_WINDOW_SIZE  U32(0x00100000)
@@ -96,7 +105,7 @@
  * the random number generator's data register, read only, in the smallest block that holds it,
  * eight bytes of LPPERI's: the rest of LPPERI reaches the LP domain's clocks and resets,
  * and the IO MUX and the GPIO matrix, the pins, for a program to set as its board wires them,
- * the flash's among them, so that whoever holds the IO MUX can cut the window onto flash off,
+ * the flash's among them, so that whoever holds the IO MUX can cut the flash off,
  * and HP_SYSTEM, whose SRAM_USAGE hands a bank of SRAM to the modem's dump engine, which then writes it.
  * PCR, PMU and the LP domain stay the kernel's: they reach the whole chip's clocks, power and resets.
  * The modem's two MACs, Wi-Fi's and 802.15.4's, are bus masters, which nothing confines,

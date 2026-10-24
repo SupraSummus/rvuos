@@ -11,10 +11,10 @@ RADIO_ESP_SRC  := $(filter-out $(RADIO_ESP)/root.c,$(wildcard $(RADIO_ESP)/*.c))
 RADIO_ESP_DATA := $(BUILD)/$(RADIO_ESP)/phy_init_data.o $(BUILD)/$(RADIO_ESP)/esp_wifi_regulatory.o
 RADIO_ESP_ROM  := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.phy.ld \
                   esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
-# A program goes where the window onto flash starts, and the configuration to the input region,
+# A program goes where the window onto flash starts, and the configuration to the input region, which lies in flash too,
 # both as the board's headers place them.
 RADIO_ESP_AT       := $(call board_hex,FLASH_WINDOW_FLASH,user/board/esp32c6/devices.h)
-RADIO_ESP_INPUT_AT := $(call board_hex,INPUT_BASE,kernel/board/esp32c6/board.h)
+RADIO_ESP_INPUT_AT := $(call board_hex,INPUT_FLASH,kernel/board/esp32c6/board.h)
 
 # The init data is written last, so it stands for every file fetched.
 $(RADIO_ESP_INIT): tools/esp-fetch.py

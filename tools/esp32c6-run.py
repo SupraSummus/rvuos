@@ -1,26 +1,22 @@
 #!/usr/bin/env python3
-"""Boot an rvuos image on an ESP32-C6 from RAM and print what it writes.
+"""Boot an rvuos image on an ESP32-C6 from flash and print what it writes.
 
-The chip's ROM loads the image's segments into RAM over USB and jumps to it,
-so nothing is written to flash.
-The flash is attached before the jump, as a bootloader leaves it,
-so that the kernel's window onto it reads; see kernel/board/esp32c6/board.h.
-Opening the USB Serial/JTAG port resets the chip,
-so the image is loaded and its output read on one connection.
+The image is the flash from its start, as kernel/build.mk makes it:
+what the ROM loads into RAM, behind Espressif's header, and the code that runs from flash after it.
+The ROM's download mode, which opening the USB Serial/JTAG port resets the chip into,
+compares the flash's MD5 with each file's, the image's and those beside it,
+and only if they differ does esptool's stub write it.
+Then the chip is reset to boot from flash, on the same connection, and its output read there.
 The kernel's halt ends with "rvuos: halted with code <n>",
 and this exits with that code, as QEMU exits with the kernel's.
 
-Data beside the image, such as the PHY harness of user/phyblob/, goes with --ram address:file,
-loaded by the ROM as the image's segments are, and bound by the same limit;
---text address:file loads a text, such as a configuration, with a NUL after it,
-since RAM keeps what an earlier run left past a shorter file.
---flash address:file has the flash hold a file at an address, such as the Wi-Fi driver of user/wifi/esp32c6/:
-the ROM compares the flash's MD5 with the file's on the same connection,
-and only if they differ does esptool's stub write it, after which the chip is reset and connected to again.
+--flash address:file has the flash hold a file at an address, such as the Wi-Fi driver of user/wifi/esp32c6/,
+and --text address:file a text, such as a configuration in the root task's input region, with a NUL after it,
+since the flash keeps what an earlier run left past a shorter file.
 What this reads on its standard input goes to the board, for a root task that takes commands from the console.
 
-Usage: tools/esp32c6-run.py [--port /dev/ttyACM0] [--timeout seconds] [--ram address:file]... [--text address:file]...
-                            [--flash address:file]... image.bin
+Usage: tools/esp32c6-run.py [--port /dev/ttyACM0] [--timeout seconds] [--flash address:file]...
+                            [--text address:file]... image.bin
 """
 
 import argparse
@@ -33,18 +29,13 @@ import threading
 import time
 
 import esptool
-from esptool.bin_image import LoadFirmwareImage
 from esptool.util import flash_size_bytes
-
-RAM_BASE = 0x40800000
-# The ROM keeps its download buffers from here up while it loads; see kernel/board/esp32c6/board.h.
-ROM_LOAD_LIMIT = 0x4086AD08
 
 HALTED = re.compile(rb"rvuos: halted with code 0x([0-9a-f]{8})")
 
 
-def ram_file(spec, end=b""):
-    """An --ram argument: the address and the bytes; end follows them, --text's NUL."""
+def flash_file(spec, end=b""):
+    """A --flash argument: the address and the bytes; end follows them, --text's NUL."""
     addr, _, path = spec.partition(":")
     return int(addr, 0), open(path, "rb").read() + end
 
@@ -59,39 +50,26 @@ def connect(port):
     return esp
 
 
-def flash(esp, port, files):
-    """The flash made to hold each (address, bytes) of files; the connection to go on with."""
+def flash(esp, files):
+    """The flash made to hold each (address, bytes) of files."""
     stale = [(addr, data) for addr, data in files if esp.flash_md5sum(addr, len(data)) != hashlib.md5(data).hexdigest()]
     if not stale:
         print(f"the flash holds {', '.join(f'{addr:#x}' for addr, _ in files)} already")
-        return esp
-    stub = esp.run_stub()
-    esptool.cmds.write_flash(stub, stale)
-    stub._port.close()
-    return connect(port)
+        return
+    esptool.cmds.write_flash(esp.run_stub(), stale)
 
 
-def load(port, path, extra=(), flash_files=()):
+def boot(port, files):
+    """The flash made to hold files, and the chip booted from it; the serial port its output comes on."""
     # esptool reports on stdout, which carries the board's output here.
     with contextlib.redirect_stdout(sys.stderr):
         esp = connect(port)
-        if flash_files:
-            esp = flash(esp, port, flash_files)
-        image = LoadFirmwareImage(esp.CHIP_NAME, path)
-        segments = [(seg.addr, seg.data) for seg in image.segments]
-        for addr, data in extra:
-            for seg_addr, seg in segments:
-                if addr < seg_addr + len(seg) and seg_addr < addr + len(data):
-                    sys.exit(f"--ram data at {addr:#x} overlaps the image's segment at {seg_addr:#x}")
-        for addr, data in segments + list(extra):
-            if not RAM_BASE <= addr <= addr + len(data) <= ROM_LOAD_LIMIT:
-                sys.exit(f"{len(data)} bytes at {addr:#x} do not lie in RAM below the ROM's buffers at {ROM_LOAD_LIMIT:#x}")
-            size = len(data)
-            blocks = (size + esp.ESP_RAM_BLOCK - 1) // esp.ESP_RAM_BLOCK
-            esp.mem_begin(size, blocks, esp.ESP_RAM_BLOCK, addr)
-            for i in range(blocks):
-                esp.mem_block(data[i * esp.ESP_RAM_BLOCK:(i + 1) * esp.ESP_RAM_BLOCK], i)
-        esp.mem_finish(image.entrypoint)
+        flash(esp, files)
+        # RTS resets the chip and DTR, low, lets it boot from flash; the USB Serial/JTAG controller stays connected.
+        esp._port.dtr = False
+        esp._port.rts = True
+        time.sleep(0.1)
+        esp._port.rts = False
     return esp._port
 
 
@@ -109,21 +87,20 @@ def main():
     parser.add_argument("--port", default="/dev/ttyACM0")
     parser.add_argument("--timeout", type=float, default=None,
                         help="give up after this many seconds; by default wait for the halt")
-    parser.add_argument("--ram", action="append", default=[], metavar="ADDRESS:FILE",
-                        help="also load a file's bytes into RAM at an address")
-    parser.add_argument("--text", action="append", default=[], metavar="ADDRESS:FILE",
-                        help="also load a text file into RAM at an address, a NUL after it")
     parser.add_argument("--flash", action="append", default=[], metavar="ADDRESS:FILE",
                         help="have the flash hold a file at an address, written only if it holds something else")
+    parser.add_argument("--text", action="append", default=[], metavar="ADDRESS:FILE",
+                        help="have the flash hold a text file at an address, a NUL after it")
     parser.add_argument("image")
     args = parser.parse_args()
 
-    extra = [ram_file(spec) for spec in args.ram] + [ram_file(spec, b"\0") for spec in args.text]
     # What the run flashes, into the log's own stream, so the host's tools can hold a log to the image that ran.
     for spec in args.flash:
         address, path = spec.split(":", 1)
         print("# flashed %#x sha256 %s" % (int(address, 0), hashlib.sha256(open(path, "rb").read()).hexdigest()))
-    serial = load(args.port, args.image, extra, [ram_file(spec) for spec in args.flash])
+    files = [flash_file(f"0:{args.image}")] + [flash_file(spec) for spec in args.flash] + \
+            [flash_file(spec, b"\0") for spec in args.text]
+    serial = boot(args.port, files)
     threading.Thread(target=forward, args=(serial,), daemon=True).start()
     serial.timeout = 0.05
     deadline = None if args.timeout is None else time.monotonic() + args.timeout
