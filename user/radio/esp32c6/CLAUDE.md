@@ -87,6 +87,22 @@ the seconds must take some 311, 1642 and 26116 us, three, sixteen and 255 passes
 A change to `slows=` of `prog/synth154.c` runs synth154 with `slows=0,1,1` and `amps=511,511,0` and `send=40`
 while the nRF52840 listens on channel 24 with `listen=15`: settings 0 and 1 must come about as often, setting 2 never.
 
+### The DC word and the transmitter's filter
+
+A change to `prog/txdc.c` runs it with `channel=6`, `srcs=0,3` and `raws=0,40,10000,200`, and again with `play=40` and `raws=40,10000`,
+and its log must show what `hw/phy.md`, "The DC word", says: 0 moving the receiver's mean nothing,
+0x40 and 0x10000 a quarter turn apart, 0x200 some eight times 0x40's the other way,
+and with the player the two's moves adding up within a few counts;
+a change to `stream=` runs it with `stream=2000`, `period=16`, `amp=64`, `dump=8192`, `dumprate=3` and `dumphex=8192`,
+and `user/radio/esp32c6/tools/dump-spectrum.py LOG 16e6` must find the tone near +0.55 MHz, in the capture's first half alone;
+a change to `modemreset=` runs it with `modemreset=2` after `prog/i154listen.c`,
+and the 802.15.4 MAC's 0x3004 must read 0x12080002 after the pulse, the dump block's words as marked.
+A change to `prog/txfilter.c` runs it with `channel=6`, `codes=100,0,3f` and `steps=80,1f4`:
+each step's line must stand within a few tenths of a dB at every code, at +5.00 and +19.53 MHz, far over its mirror's, the control;
+a change to its `rhythm=` runs it with `rhythm=20`, `step=461`, `tonehalf=50` and `codes=100,100`
+while the nRF52840 watches 802.15.4's channel 21 with `watch=12`, and `user/thread/tools/watch-spectrum.py` must find a line at 10 Hz,
+and again with `tonehalf=0` and `codes=100,3f`, which must find none, as `hw/phy.md`, "The transmitter's filter", says.
+
 ### The BBPLL
 
 A change to `prog/bbpll.c` runs it on `channel=1` while the nRF52840 sends its carrier on channel 11 with `carrier=20` and `power=-20`,

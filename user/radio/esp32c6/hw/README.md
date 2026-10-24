@@ -70,6 +70,15 @@ What it read, measured on one board in runs on channels 1 and 6 and on 8 and 13:
   and the page from 0x600AF000 took 0.45 s to read, where it takes 1 ms once they are, some of its reads waiting;
   every other block reads what the image before left there:
   the board's reset does not reset the modem's words, and the second run's cold pass read the channel the first ended on.
+- **The modem's resets.** ESP-IDF's restart pulses `MODEM_SYSCON`'s `MODEM_RST_CONF` 0x600A9810, all ones then 0,
+  and `MODEM_LPCON`'s `RST_CONF` 0x600AF024, 0xF then 0, `modem_syscon_ll_reset_all` and `modem_lpcon_ll_reset_all`,
+  which esp-sdr-zephyr does at every start against what an image before left.
+  Pulsed before the bring-up (measured, `prog/txdc.c` with `modemreset=1` and `modemreset=2`, after an 802.15.4 run),
+  it put back the Wi-Fi MAC's 0x600A4400, 0xc1cb3754 to 0xc1c93735, the 802.15.4 MAC's 0x600A3004, 0x02080080 to 0x12080002,
+  `FEDATA` 0x600A0450 to 0 and 0x600A0414's 0xc8007 to 0xc8003,
+  and left the dump block's words 0x9004, 0x900C and 0x9010 as written, and the AGC's 0x600A702C;
+  the bring-up after it went as without, the loopback's estimate the same.
+  So the pulse clears what 802.15.4 leaves in the MACs, but not a player left playing, which `dump_known` stops.
 - **What moves.** Between two reads in a row, 0x600A4E4C's low 12 bits, and 0x600A4E54 once;
   between two passes, the counters of the Wi-Fi MAC, the 802.15.4 MAC's 0x600A30BC, and words of the receiver's.
   What the channel sets is in `phy.md`, "The channel's words, measured".

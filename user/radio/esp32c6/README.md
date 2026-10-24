@@ -24,6 +24,8 @@ The other programs are the files of `prog/`, each an image of its own, and each 
 | `scan` | the receiver swept off the channels' grid, a capture at each step, which `user/radio/esp32c6/tools/dump-spectrum.py --scan` puts side by side |
 | `ring` | the dump engine writing round a ring, which stops itself as a frame the Wi-Fi MAC takes ends, so that it holds what came before |
 | `etm` | the modem's ETM and the engine's sources, surveyed for what stops the engine |
+| `txdc` | the transmitter's DC word, which the CPU may write a sample at a time, and what else in the front end gates or scales what goes out |
+| `txfilter` | the tone looped back and on the air against the analog block's registers taken for the transmitter's filter |
 | `regmap` | every word of the modem's frame and the analog I2C's registers, cold, up, a moment later and on another channel, which `user/radio/esp32c6/tools/regmap.py` reads |
 
 The root task reads what a program needs from its image's header, `DRV_PROGRAM` in `drv.h`,

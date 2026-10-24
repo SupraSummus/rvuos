@@ -6073,12 +6073,11 @@ void drv_phy_tone(uint32_t on, uint32_t step, uint32_t atten)
     }
 }
 
-#define BAND_LOW_KHZ  2400500u /* the 2.4 GHz band's edges, half a MHz in */
-#define BAND_HIGH_KHZ 2483000u
+#define BAND_HIGH_KHZ 2483000u /* the 2.4 GHz band's upper edge, half a MHz in */
+#define TONE_STEPS    512u     /* the steps whose DAC image, 80 MHz below the line, lies 60 MHz or more from it */
 
 int drv_phy_tone_fits(uint32_t channel, uint32_t step)
 {
     uint32_t carrier = 2407000u + 5000u * channel, up = (step & 0x3ffu) * 390625u / 10000u;
-    uint32_t below = (step & 0x3ffu) >= 512u ? 40000u - up : 0u; /* the ten bits as two's complement */
-    return carrier + up <= BAND_HIGH_KHZ && carrier - below >= BAND_LOW_KHZ;
+    return (step & 0x3ffu) < TONE_STEPS && carrier + up <= BAND_HIGH_KHZ;
 }

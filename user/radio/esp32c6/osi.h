@@ -164,8 +164,10 @@ uint32_t drv_phy_rx_filter(uint32_t code);
 void drv_phy_loopback(uint32_t on, uint32_t lb);
 void drv_phy_tone(uint32_t on, uint32_t step, uint32_t atten);
 /*
- * Whether the tone of a step lies within the 2.4 GHz band on a Wi-Fi channel, half a MHz in from its edges,
- * a step being 39.0625 kHz above the carrier, or below it if the ten bits are two's complement, which is not known:
+ * Whether the tone of a step lies within the 2.4 GHz band on a Wi-Fi channel, half a MHz in from its upper edge,
+ * a step being 39.0625 kHz above the carrier, the ten bits unsigned, up to 40 MHz, see hw/phy.md, "The loopback";
+ * and whether the step is below 512, 20 MHz, as the DAC sends an image of the line 80 MHz below it,
+ * outside the band, which comes nearer the line and as strong as it the nearer the line is to 40 MHz:
  * the loopback lets the tone out, so a program checks each step it may send.
  */
 int drv_phy_tone_fits(uint32_t channel, uint32_t step);
