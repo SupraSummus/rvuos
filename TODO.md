@@ -317,8 +317,7 @@ what is left:
 
 ## ESP32-C5
 
-- The modem, the radio and Wi-Fi: nothing yet, nor the devices beyond the four `board.h` lists,
-  the board's LCD on the SPI among them, whose clocks and resets lie in PCR, the kernel's.
+- The modem, the radio and Wi-Fi: nothing yet, nor the devices beyond the five `board.h` lists.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
 - Bus errors are taken late, several instructions past the access, with `mtval` exact and `mepc` past it,

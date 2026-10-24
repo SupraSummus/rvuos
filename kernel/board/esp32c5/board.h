@@ -80,15 +80,19 @@
  * user/board/esp32c5/devices.h names their slots.
  * The eFuse, read only so that no program burns a fuse, and short of the OTP debug registers above it,
  * the ROM, read and execute,
- * and the IO MUX and the GPIO matrix, the pins, for a program to set as its board wires them,
- * the flash's among them, so that whoever holds the IO MUX can cut the flash off.
+ * the IO MUX and the GPIO matrix, the pins, for a program to set as its board wires them,
+ * the flash's among them, so that whoever holds the IO MUX can cut the flash off,
+ * and SPI2, the general-purpose SPI controller, which drives the Waveshare board's LCD;
+ * it reaches memory only through the GDMA, which is not listed, so it is no bus master to whoever holds it.
+ * Its clocks are the kernel's, in PCR; see board.c.
  */
-#define BOOT_DEVICES 4
+#define BOOT_DEVICES 5
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x600B4800), U32(0x00000400), RIGHT_R },             \
     { U32(0x40000000), U32(0x00080000), RIGHT_R | RIGHT_X },    \
     { U32(0x60090000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },
+    { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x60081000), U32(0x00001000), RIGHT_R | RIGHT_W },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

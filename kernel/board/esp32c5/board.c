@@ -19,6 +19,12 @@
  * The pins stay as the ROM leaves them: how a board wires them is for a program to set,
  * through the IO MUX and the GPIO matrix board.h lists.
  *
+ * No program reaches PCR, which holds the whole chip's clocks and resets,
+ * so the kernel turns on the clocks of the one controller board.h lists, SPI2, and lets it out of reset.
+ * It resets SPI2 first, since a reset of the chip keeps PCR's and the controller's state alike,
+ * so a program finds the controller as it comes out of reset, whatever the last one left.
+ * Its function clock is PLL_F160M halved, 80 MHz, the most the controller takes; the program divides it further in SPI2's own registers.
+ *
  * The MMU's only valid entries are the image's 64 KiB pages, see board.h, which the kernel sets,
  * with the cache emptied of what the pages held before, then lets the cache's buses through.
  *
@@ -62,10 +68,17 @@
  * The words between them that ESP-IDF names nothing in are written too.
  */
 #define TEE_PERI_FIRST       0x60098088u /* UART0's */
-#define TEE_PERI_LAST        0x6009812Cu /* INTPRI's */
+#define TEE_PERI_LAST        0x60098140u /* the bit scrambler's, past SPI2's */
 #define LP_TEE_PERI_FIRST    0x600B3404u /* the eFuse's */
 #define LP_TEE_PERI_LAST     0x600B344Cu /* LP_APM's */
 #define TEE_EVERY_MODE       0xFFu
+
+/* SPI2's clocks and reset, in PCR. */
+#define PCR_SPI2_CONF        0x600960C4u
+#define PCR_SPI2_CLK_EN      (1u << 0) /* its registers' clock */
+#define PCR_SPI2_RST_EN      (1u << 1)
+#define PCR_SPI2_CLKM_CONF   0x600960C8u
+#define PCR_SPI2_CLKM_80M    ((1u << 22) | (1u << 20) | (1u << 12)) /* CLKM_EN, PLL_F160M, divided by DIV_NUM 1 plus one */
 
 /* The MMU, which maps 64 KiB pages of flash through the cache from 0x42000000, one entry each, and the cache. */
 #define MMU_ITEM_CONTENT     0x6000237Cu
@@ -127,6 +140,10 @@ void board_init(void)
     for (uint32_t at = LP_TEE_PERI_FIRST; at <= LP_TEE_PERI_LAST; at += 4) {
         REG(at) = TEE_EVERY_MODE;
     }
+
+    REG(PCR_SPI2_CONF) = PCR_SPI2_CLK_EN | PCR_SPI2_RST_EN;
+    REG(PCR_SPI2_CONF) = PCR_SPI2_CLK_EN;
+    REG(PCR_SPI2_CLKM_CONF) = PCR_SPI2_CLKM_80M;
 
     for (unsigned i = 0; i < 2; i++) {
         REG(TIMG_WDTWPROTECT(i)) = WDT_KEY;

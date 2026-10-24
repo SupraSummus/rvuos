@@ -241,8 +241,8 @@ Interrupt lines:
 | 1 to 85 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 55 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-and after them, in slot 25, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
-so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots:
+and after them, in slot 26, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
+so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
@@ -250,8 +250,14 @@ so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots:
 | 22 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM | read, execute |
 | 23 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
 | 24 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
+| 25 | `BOOT_CAP_SPI2` | `0x60081000` | 4 KiB | SPI2, the general-purpose SPI controller, which drives the board's LCD | read, write |
 
-The modem is not listed yet, nor PCR, PMU and the LP domain.
+The modem is not listed yet, nor PCR, PMU and the LP domain, nor the GDMA.
+SPI2's clocks lie in PCR, so the kernel sets them at boot: its master clock runs at 80 MHz, PLL_F160M halved,
+which a program divides further in SPI2's `SPI_CLOCK`, and the controller comes out of a reset of its own, whatever the last program left in it.
+Without the GDMA it sends only what the CPU writes into its 64-byte buffer, a transfer at a time.
+`user/lcd/` drives the LCD of Waveshare's board with it, an ST7789 of 172 by 320 pixels,
+and renders on the host, against a model of the LCD, what it shows: `make lcd-sim`.
 The flash's pins are in the IO MUX, so a program that holds it can cut the flash off, the root task's code with it,
 and so are the USB pins, which carry the console and the reset into the ROM's download mode.
 

@@ -247,6 +247,8 @@ so it lists no counter, and the demo skips what it times with loads of one.
 Besides the access permission management units, CPU_APM among them, which keep user mode from even fetching from SRAM,
 TEE controllers give each peripheral a read and a write bit per security mode, resetting to machine mode's alone,
 so user mode reads every peripheral as zero; the kernel turns the units off and grants every TEE bit to every mode.
+Of the peripherals it lists SPI2, which drives the board's LCD, and not the GDMA, so SPI2 is no bus master to the program that holds it;
+SPI2's clocks are in PCR, which stays the kernel's, so the kernel sets them, 80 MHz for its master clock, and resets the controller at boot.
 The kernel sets 160 MHz, as on the ESP32-C6: ESP-IDF's 240 MHz raises the core's voltage first,
 and on this revision a move to it from PLL_F160M can stop the root clock, IDF-11064.
 User mode can write the N extension's CSRs, the CLIC's `utvt` and `uintthresh`, `uscratch`, an unnamed one at `0x017`, and the dedicated GPIO,

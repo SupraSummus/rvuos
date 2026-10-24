@@ -51,7 +51,7 @@ escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 # Every process runs code from the one image but only the root task with its data,
 # so no other object may keep a global, which the link checks, the library's among them.
 LIB_OBJ       := $(patsubst %.c,$(BUILD)/%.o,$(wildcard user/lib/*.c))
-PROGRAMS      := wifi libtest bench lab thread observer
+PROGRAMS      := wifi libtest bench lab thread observer lcd
 program_root   = $(BUILD)/user/$(1)/root.o
 # A program's sources: every .c and .S beside its root task, but not the root task itself.
 program_others = $(patsubst %.c,$(BUILD)/%.o,$(patsubst %.S,$(BUILD)/%.o,\
