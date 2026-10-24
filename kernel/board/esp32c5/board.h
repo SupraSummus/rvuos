@@ -82,17 +82,21 @@
  * the ROM, read and execute,
  * the IO MUX and the GPIO matrix, the pins, for a program to set as its board wires them,
  * the flash's among them, so that whoever holds the IO MUX can cut the flash off,
- * and SPI2, the general-purpose SPI controller, which drives the Waveshare board's LCD;
+ * SPI2, the general-purpose SPI controller, which drives the Waveshare board's LCD;
  * it reaches memory only through the GDMA, which is not listed, so it is no bus master to whoever holds it.
  * Its clocks are the kernel's, in PCR; see board.c.
+ * And the random number generator, in the smallest block that holds it, the first 128 bytes of LPPERI, the PMP's grain,
+ * read only, since its other words reach the LP domain's clocks and resets and the generator's sources,
+ * which the kernel sets; see board.c.
  */
-#define BOOT_DEVICES 5
+#define BOOT_DEVICES 6
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x600B4800), U32(0x00000400), RIGHT_R },             \
     { U32(0x40000000), U32(0x00080000), RIGHT_R | RIGHT_X },    \
     { U32(0x60090000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x60081000), U32(0x00001000), RIGHT_R | RIGHT_W },
+    { U32(0x60081000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600B2800), U32(0x00000080), RIGHT_R },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

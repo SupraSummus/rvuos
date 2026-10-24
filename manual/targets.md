@@ -241,8 +241,8 @@ Interrupt lines:
 | 1 to 85 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 55 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-and after them, in slot 26, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
-so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots:
+and after them, in slot 27, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
+so `BOOT_CAP_COUNT` is 28 here and the root task's table has 74 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
@@ -251,14 +251,19 @@ so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots:
 | 23 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
 | 24 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
 | 25 | `BOOT_CAP_SPI2` | `0x60081000` | 4 KiB | SPI2, the general-purpose SPI controller, which drives the board's LCD | read, write |
+| 26 | `BOOT_CAP_RNG` | `0x600B2800` | 128 B | LPPERI's first words, the PMP's grain, which hold the random number generator's: `RNG_DATA_SYNC` at `0x28`, a new word at every read, and `RNG_CFG` at `0x24` | read |
 
-The modem is not listed yet, nor PCR, PMU and the LP domain, nor the GDMA.
+The modem is not listed yet, nor PCR, PMU and the LP domain beyond the random number generator's words, nor the GDMA.
+The kernel has the generator sample its ring oscillator, as ESP-IDF does at its start, besides the two timers it stirs in as the ROM leaves it;
+its noise from the SAR ADC and the radio comes only while they run, which nothing yet makes them do on this chip,
+and its words look random whether it samples or not, so how much entropy they carry is not known.
 SPI2's clocks lie in PCR, so the kernel sets them at boot: its master clock runs at 80 MHz, PLL_F160M halved,
 which a program divides further in SPI2's `SPI_CLOCK`, and the controller comes out of a reset of its own, whatever the last program left in it.
 Without the GDMA it sends only what the CPU writes into its 64-byte buffer, a transfer at a time.
 `user/lcd/` drives the LCD of Waveshare's board with it, an ST7789 of 172 by 320 pixels,
 and renders on the host, against a model of the LCD, what it shows: `make lcd-sim`.
-`make BOARD=esp32c5 lcd LCD_CONFIG="scene=stress mhz=80"` runs it on the board, its scene and its bus's clock as named.
+`make BOARD=esp32c5 lcd LCD_CONFIG="scene=stress mhz=80"` runs it on the board, its scene and its bus's clock as named;
+`scene=noise` draws snow from the random number generator, 600 pictures, or `pictures=` as many, `pictures=0` without end.
 GPIO_EXT, with its sigma-delta modulator, lies in the GPIO's own page, on the IO MUX's clock, which the kernel leaves as the chip starts,
 so a program that holds the GPIO can drive a pin at a density of its own; `user/lcd/` dims the backlight so.
 The flash's pins are in the IO MUX, so a program that holds it can cut the flash off, the root task's code with it,

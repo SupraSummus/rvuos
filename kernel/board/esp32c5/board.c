@@ -25,6 +25,9 @@
  * so a program finds the controller as it comes out of reset, whatever the last one left.
  * Its function clock is PLL_F160M halved, 80 MHz, the most the controller takes; the program divides it further in SPI2's own registers.
  *
+ * The random number generator, which board.h lists read only, comes from the ROM stirring in two timers
+ * but not sampling its ring oscillator, which the kernel turns on, as ESP-IDF does at its start.
+ *
  * The MMU's only valid entries are the image's 64 KiB pages, see board.h, which the kernel sets,
  * with the cache emptied of what the pages held before, then lets the cache's buses through.
  *
@@ -79,6 +82,10 @@
 #define PCR_SPI2_RST_EN      (1u << 1)
 #define PCR_SPI2_CLKM_CONF   0x600960C8u
 #define PCR_SPI2_CLKM_80M    ((1u << 22) | (1u << 20) | (1u << 12)) /* CLKM_EN, PLL_F160M, divided by DIV_NUM 1 plus one */
+
+/* LPPERI's RNG_CFG, whose low bit has the generator sample its ring oscillator. */
+#define LPPERI_RNG_CFG       0x600B2824u
+#define RNG_SAMPLE_ENABLE    (1u << 0)
 
 /* The MMU, which maps 64 KiB pages of flash through the cache from 0x42000000, one entry each, and the cache. */
 #define MMU_ITEM_CONTENT     0x6000237Cu
@@ -144,6 +151,8 @@ void board_init(void)
     REG(PCR_SPI2_CONF) = PCR_SPI2_CLK_EN | PCR_SPI2_RST_EN;
     REG(PCR_SPI2_CONF) = PCR_SPI2_CLK_EN;
     REG(PCR_SPI2_CLKM_CONF) = PCR_SPI2_CLKM_80M;
+
+    REG(LPPERI_RNG_CFG) |= RNG_SAMPLE_ENABLE;
 
     for (unsigned i = 0; i < 2; i++) {
         REG(TIMG_WDTWPROTECT(i)) = WDT_KEY;

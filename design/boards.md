@@ -249,6 +249,10 @@ TEE controllers give each peripheral a read and a write bit per security mode, r
 so user mode reads every peripheral as zero; the kernel turns the units off and grants every TEE bit to every mode.
 Of the peripherals it lists SPI2, which drives the board's LCD, and not the GDMA, so SPI2 is no bus master to the program that holds it;
 SPI2's clocks are in PCR, which stays the kernel's, so the kernel sets them, 80 MHz for its master clock, and resets the controller at boot.
+It lists the random number generator too, read only, as the first 128 bytes of LPPERI, since the PMP's grain is that coarse,
+where the ESP32-C6 lists the eight bytes of its data register;
+a program reads but cannot write the block's other words, the LP domain's clocks and resets among them,
+nor `RNG_CFG`, the generator's sources, which the kernel sets to sample the ring oscillator, as ESP-IDF does.
 The kernel sets 160 MHz, as on the ESP32-C6: ESP-IDF's 240 MHz raises the core's voltage first,
 and on this revision a move to it from PLL_F160M can stop the root clock, IDF-11064.
 User mode can write the N extension's CSRs, the CLIC's `utvt` and `uintthresh`, `uscratch`, an unnamed one at `0x017`, and the dedicated GPIO,

@@ -40,6 +40,16 @@ static uint64_t board_cycles(void)
     return panel_now_ns() * (BOARD_HZ / 1000u) / 1000000u;
 }
 
+/* The noise scene's source on the host, Marsaglia's xorshift32, the same snow every run. */
+static uint32_t xorshift(void)
+{
+    static uint32_t x = 2463534242u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return x;
+}
+
 static int write_glass(const char *path)
 {
     static uint32_t pixels[GLASS_W * GLASS_H];
@@ -137,6 +147,7 @@ int main(int argc, char **argv)
     struct anim_report report;
     options.clock = board_cycles;
     options.report = &report;
+    options.random = xorshift;
     app_run(&lcd, scene, &options);
     panel_on_time(0);
     if (scene == APP_ANIM) {

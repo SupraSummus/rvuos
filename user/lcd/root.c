@@ -12,8 +12,10 @@
  * Its input region holds a configuration, words of key=value:
  * scene= names app.c's scene, pattern unless given, mhz= the bus's clock, 40 or 80, and drive= its pins' drive, 0 to 3,
  * see spi2.h, madctl= the orient scene's MADCTL in decimal, such as madctl=96, each of orient.h's in turn unless given,
- * and backlight= its level, 0 to 255, see bus.h, 255 unless given.
+ * backlight= its level, 0 to 255, see bus.h, 255 unless given,
+ * and pictures= how many the noise scene draws, see noise.h, 0 for no end, which never halts.
  * The anim scene's report, see anim.h, follows the drawing on the console.
+ * The noise scene writes the random number generator's RNG_CFG before it draws and after, its top byte the ring oscillator's samples.
  * What it does not find it leaves at the default.
  *
  * The probe scene leaves the screen black and takes lines from the console, for user/lcd/tools/probe.py:
@@ -56,6 +58,7 @@ enum {
 #define REGION_GPIO    4
 #define REGION_SPI2    5
 #define REGION_INPUT   6
+#define REGION_RNG     7
 
 #define BIT_TIMER   1u
 #define BIT_CONSOLE 2u
@@ -162,6 +165,21 @@ static uint64_t clock_hz(void)
     uint32_t hz;
     expect("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &now, &hz));
     return hz;
+}
+
+/* A word from the chip's random number generator, for the noise scene. */
+static uint32_t random_word(void)
+{
+    return *(volatile const uint32_t *)RNG_DATA_SYNC;
+}
+
+static void rng_print(const char *when)
+{
+    puts("lcd: RNG_CFG ");
+    puts(when);
+    puts(" ");
+    put_hex(*(volatile const uint32_t *)RNG_CFG);
+    puts("\n");
 }
 
 /* How many frames the timing scene times a frame rate over. */
@@ -386,6 +404,7 @@ int main(void)
     expect("map the IO MUX", rv_process_install(BOOT_CAP_PROCESS, REGION_IO_MUX, BOOT_CAP_IO_MUX, RIGHT_R | RIGHT_W));
     expect("map the pins", rv_process_install(BOOT_CAP_PROCESS, REGION_GPIO, BOOT_CAP_GPIO, RIGHT_R | RIGHT_W));
     expect("map SPI2", rv_process_install(BOOT_CAP_PROCESS, REGION_SPI2, BOOT_CAP_SPI2, RIGHT_R | RIGHT_W));
+    expect("map the RNG", rv_process_install(BOOT_CAP_PROCESS, REGION_RNG, BOOT_CAP_RNG, RIGHT_R));
 
     expect("allocate the timer's notification", rv_pool_alloc(BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_NTFN, 0));
     expect("carve a timer line", rv_irq_carve(BOOT_CAP_TIMER_LINES, 0, 1, SLOT_LINE));
@@ -405,6 +424,8 @@ int main(void)
     struct anim_report report;
     options.clock = cycles;
     options.report = &report;
+    options.random = random_word;
+    options.pictures = config_number(conf, size, "pictures", NOISE_PICTURES);
     if (options.backlight > LCD_BACKLIGHT_FULL) {
         options.backlight = LCD_BACKLIGHT_FULL;
     }
@@ -431,6 +452,9 @@ int main(void)
     }
     puts("\n");
 
+    if (scene == APP_NOISE) {
+        rng_print("before");
+    }
     lcd_bus_init();
     spi2_configure(mhz, drive);
     uint64_t t0 = cycles();
@@ -447,6 +471,8 @@ int main(void)
         timing_run();
     } else if (scene == APP_ANIM) {
         anim_print(&report);
+    } else if (scene == APP_NOISE) {
+        rng_print("after");
     }
     rv_halt(BOOT_CAP_HALT, 0);
     return 0;
