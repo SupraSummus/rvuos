@@ -12,6 +12,7 @@
  * has children add to a count they share under a lock, sleeping now and then while they hold it,
  * and again under a lock that names its holder, whose takers lend the holder their time;
  * waits for an event a child sets, and for one nothing sets, which its deadline ends;
+ * waits through a waiter for one bit while a periodic line ticks, and finds every tick counted and a bit it did not ask for kept;
  * has a thread publish a snapshot through a seqlock, on the second core where there is one, while a child reads it,
  * and stops the writer while it writes;
  * hands a buffer between two children, and hears the last fault on it once it is taken;
@@ -520,6 +521,60 @@ static void event_round(void)
     check(same(tally(), unroomed), "the setter, the event and the room gave back what they were given");
 }
 
+/* A waiter's bits: a periodic line's, a device's, which a one-shot line stands for, and a guard's, which ends a wait that would last for ever. */
+#define WAIT_TICK     0x1u
+#define WAIT_DEVICE   0x2u
+#define WAIT_GUARD    0x4u
+#define WAIT_TICK_US  2000u
+#define WAIT_TICKS    5u /* the device's bit comes this many periods after the tick is armed */
+#define WAIT_GUARD_US 1000000u
+
+/* A wait through w for want, which the guard must not end. */
+static void wait_for(struct waiter *w, uint32_t want, const char *what)
+{
+    uint32_t bits;
+    must(what, waiter_wait(w, want | WAIT_GUARD, 0, &bits));
+    check(bits == want, what);
+}
+
+/*
+ * A wait for the device takes the ticks before it, and must arm the line again for each, as a nested wait would;
+ * a wait for the tick takes the device's bit, which must be kept for the wait that asks.
+ */
+static void wait_round(void)
+{
+    struct self_tally before = tally();
+    struct waiter w;
+    uint32_t note, tick, device, guard;
+    must("a slot for the waiter's notification", slot_new(&self, &note));
+    must("the waiter's notification", rv_pool_alloc(self.pool, CAP_NOTIFICATION, note, 0));
+    must("the waiter's tick", timer_bind(&self, self.pool, note, &tick));
+    must("the waiter's device", timer_bind(&self, self.pool, note, &device));
+    must("the waiter's guard", timer_bind(&self, self.pool, note, &guard));
+    waiter_init(&w, note);
+    must("arm the guard", rv_timer_set(guard, WAIT_GUARD, WAIT_GUARD_US));
+    must("arm the tick", waiter_period(&w, tick, WAIT_TICK, WAIT_TICK_US));
+    must("arm the device", rv_timer_set(device, WAIT_DEVICE, WAIT_TICKS * WAIT_TICK_US));
+
+    wait_for(&w, WAIT_DEVICE, "a wait for the device");
+    /* WAIT_TICKS - 1 deadlines at least pass before the device's bit, and a line left masked would fire at the first alone. */
+    check(waiter_passed(&w, WAIT_TICK) >= WAIT_TICKS - 1u, "a wait for another bit arms the period again for every tick");
+    wait_for(&w, WAIT_TICK, "the tick the wait for the device kept");
+
+    must("the device's bit", rv_signal(note, WAIT_DEVICE));
+    wait_for(&w, WAIT_TICK, "a wait for the tick with the device's bit set");
+    wait_for(&w, WAIT_DEVICE, "a bit a wait for another took is kept");
+
+    must("stop the tick", waiter_period(&w, tick, WAIT_TICK, 0));
+    must("quiet the guard", rv_irq_set(guard, 0));
+    say(&out, "libtest: a waiter keeps the bits a wait took for another, and arms its period again: ok\n");
+    must("the guard back", slot_free(&self, guard));
+    must("the device back", slot_free(&self, device));
+    must("the tick back", slot_free(&self, tick));
+    must("the waiter's notification back", slot_free(&self, note));
+    check(same(tally(), before), "the waiter's notification and lines gave back what they were given");
+}
+
 /* The snapshot's writer, a thread of the root task's, and its stack. */
 static uint8_t snap_stack[1024] __attribute__((aligned(16)));
 
@@ -887,6 +942,7 @@ int main(void)
     lock_round(0);
     lock_round(1);
     event_round();
+    wait_round();
     snap_round();
     pass_round();
     bulk_round();

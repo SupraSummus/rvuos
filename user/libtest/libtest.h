@@ -12,6 +12,7 @@
 #include "lib/event.h"
 #include "lib/lock.h"
 #include "lib/seqlock.h"
+#include "lib/wait.h"
 
 /* Each peer sends PACKETS packets of 1 to PACKET_MAX bytes, through rings of a few slots. */
 #define PACKETS    40u

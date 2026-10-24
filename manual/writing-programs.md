@@ -191,6 +191,10 @@ for (;;) {
 Arming again after servicing is the acknowledgement.
 Give a timer line a second bit on the same notification for a timeout.
 
+A wait takes every bit, so a wait nested in the loop may take a bit the loop services or arms a line on,
+and that source falls silent.
+`lib/wait.h` keeps such bits for the wait that asks, and arms a periodic timer line again whichever wait took its bit.
+
 ### 8.4 The library for programs
 
 `user/lib/` is what a program of several processes needs beside the system calls,
@@ -207,6 +211,7 @@ Each header says how its calls are used.
 | `lib/bulk.h` | bulk data a lender lends its borrowers where it lies: a connection's buffers in the lender's memory, lent to read, which the borrower maps read only, or to fill, through two rings of references |
 | `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held; and one whose word names its holder, so that a taker that waits lends the holder its time, section 5.12 |
 | `lib/event.h` | an event one thread waits for, until a deadline at most, and others set from memory they share with it: a word set with an atomic operation, and a notification and a timer line of the waiter's |
+| `lib/wait.h` | waits on one notification that lose nothing to a nested wait: bits kept for the wait that asks, periodic timer lines armed again |
 | `lib/seqlock.h` | a snapshot one child publishes and others copy out whole, from memory they may hold read only: a count and two copies, so that neither side calls the kernel or waits for the other |
 | `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Print`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
@@ -334,6 +339,7 @@ then, in room for children's data, it builds a server with a hub and a client on
 and takes one client down and connects another in its place twice, each finding its channel zeroed;
 has three children add to a count they share under a lock, each sleeping now and then while it holds it;
 waits for an event a child sets, each set ending a wait, and for one nothing sets, which its deadline ends;
+waits through a waiter for one bit while a periodic line ticks, and finds every tick counted and a bit it did not ask for kept;
 hands a buffer between two children and back, then takes it from the last, which must fault when it stores to it;
 has a lender lend buffers to two borrowers to fill and to read, refuse what a forger hands it,
 zero a connection for its next borrower, and serve one borrower beside another that makes its ring seem to hold a billion,

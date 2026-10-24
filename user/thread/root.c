@@ -44,6 +44,7 @@
 #include "lib/libc.h"
 #include "lib/say.h"
 #include "lib/self.h"
+#include "lib/wait.h"
 #include "link.h"
 #include "mac154.h"
 #include "wifi/conf.h"
@@ -119,7 +120,8 @@
 static struct self self;
 static struct link link;
 static uint32_t radio_irq, radio_bit, timer_irq, timer_bit, end_irq, end_bit, step_irq, step_bit;
-static uint32_t stream_irq, stream_bit, pending;
+static uint32_t stream_irq, stream_bit;
+static struct waiter waiter; /* every wait on the inbox */
 static uint8_t load_stack[256] __attribute__((aligned(16)));
 static volatile uint32_t load_rounds;
 
@@ -148,13 +150,8 @@ static void must(const char *what, uint32_t status)
 /* Waits until a bit of want is signalled, and takes those of want that were. */
 static uint32_t wait_for(uint32_t want)
 {
-    while ((pending & want) == 0) {
-        uint32_t bits;
-        must("wait", rv_wait(self.inbox, &bits));
-        pending |= bits;
-    }
-    uint32_t got = pending & want;
-    pending &= ~got;
+    uint32_t got;
+    must("wait", waiter_wait(&waiter, want, 0, &got));
     return got;
 }
 
@@ -388,8 +385,7 @@ static bool exchange(const struct config *c)
     link_listen(&link, c->channel);
     must("set the exchange's end", rv_timer_set(end_irq, end_bit, c->run_s * US_PER_S));
     if (c->stream != 0) {
-        uint32_t skipped;
-        must("set the stream's period", rv_timer_period(stream_irq, stream_bit, US_PER_S / c->stream, &skipped));
+        must("set the stream's period", waiter_period(&waiter, stream_irq, stream_bit, US_PER_S / c->stream));
     }
     for (;;) {
         uint32_t got = wait_for(radio_bit | timer_bit | end_bit | step_bit | stream_bit);
@@ -410,9 +406,8 @@ static bool exchange(const struct config *c)
             pong_ready = pong_due;
         }
         if (got & stream_bit) {
-            uint32_t skipped;
-            must("set the stream's period", rv_timer_period(stream_irq, stream_bit, US_PER_S / c->stream, &skipped));
-            t.stream_skipped += skipped + (stream_due ? 1u : 0u);
+            /* Of the periods that passed, the newest's frame is due now; the others', and one still due from before, are skipped. */
+            t.stream_skipped += waiter_passed(&waiter, stream_bit) - 1u + (stream_due ? 1u : 0u);
             stream_due = true;
         }
         finished(&sending);
@@ -430,7 +425,7 @@ static bool exchange(const struct config *c)
     }
     link_off(&link);
     must("stop the step's timer", rv_timer_set(step_irq, 0, 0));
-    must("stop the stream", rv_timer_set(stream_irq, 0, 0));
+    must("stop the stream", waiter_period(&waiter, stream_irq, stream_bit, 0));
     must("the link's calls", link.fault);
     summary(&t, c);
     return t.pings != 0 && t.pongs.ended[LINK_ACKED] != 0 && (c->stream == 0 || t.stream.ended[LINK_ACKED] != 0);
@@ -740,6 +735,7 @@ int main(void)
     uint32_t base, size, region;
     must("the console", rv_frame_info(BOOT_CAP_UART, &base, &size));
     must("the root's own", self_root(&self, ROOT_UNITS));
+    waiter_init(&waiter, self.inbox);
     must("map the console", region_install(&self, BOOT_CAP_UART, RIGHT_R | RIGHT_W, &region));
     console_init(base);
     must("map the radio", region_install(&self, BOOT_CAP_RADIO, RIGHT_R | RIGHT_W, &region));

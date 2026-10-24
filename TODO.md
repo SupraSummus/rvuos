@@ -71,6 +71,10 @@ Thread, IPv6 over 802.15.4 in a mesh, needs more of it, step by step:
 `user/wifi/NOTES.md` says what writing a program of several processes was like, and `user/lib/` is what came of it;
 what is left:
 
+- A timer set again or masked takes back no bit it already signalled, so a later wait on it can end on the old one.
+  `user/init/cores.c` cancels the pings' timeout after the last pong, and one that fired between leaves a bit
+  that `moved_while_spinning` takes, and each wait for the timer after it ends a firing early.
+- The lab's roles, `user/lab/roles.c`, keep the bits a wait did not ask for by hand, as `lib/wait.h`'s waiter does.
 - The library's blocks join again only all at once, when no free block will do and every one is back,
   so a program that keeps one block for good, as the Wi-Fi system its driver, ends with the halves it had, a slot each.
   Keeping a split's parent while a half is taken would let two free halves join as they come back,
@@ -616,14 +620,6 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   `a7` past the code is refused today, so the bits are free until the ABI is held still, and not after;
   the replay's record would carry the count with the code.
 - The breaking changes decision 31 lists, each in a change of its own.
-- A wake lost for good: `OP_NOTIFY_WAIT` takes every bit, and a line, a periodic timer's too, fires once until armed
-  again, so a wait nested in a loop on the same notification can take the bit the loop arms on, and the source stops,
-  silently. The ESP32-C6's 802.15.4 listener went deaf so, and stopped answering the root task's checks, which come on
-  another notification; `i154.c` now arms its tick in the nested wait too.
-  Ways out, cheapest first: a waiter in `user/lib/` that keeps the bits a nested wait took;
-  a program's lines and timers bound to its inbox's notification, so that one wait sees every source;
-  `OP_NOTIFY_WAIT` given a mask, an operation whose arguments change;
-  a periodic line the kernel arms again itself, a change to how lines fire.
 
 ## Code
 

@@ -54,6 +54,17 @@ but periods fired before the thread wakes would merge into one bit,
 and a task that wanted one wake would race the next to disarm the line.
 It would also be the one line that does not mask itself as it signals.
 
+**Why a waiter arms it again.**
+A wait takes every bit, so a wait nested in a loop could take the bit the loop arms its line on,
+and the line would fall silent for good.
+The kernel could arm a timer's line again, but not a device's, which only its driver may, once it has serviced the device.
+Nor would a mask on `OP_NOTIFY_WAIT` do:
+a nested wait that needs the tick for a deadline of its own takes it all the same,
+and waiters with masks of their own would have a signal walk them for one that wants its bits, which goal 4 rules out.
+So the program does it, where all its waits pass:
+the waiter of `user/lib/wait.h` arms a periodic line again whichever wait took its bit,
+and keeps a bit a wait did not ask for, for the wait that does.
+
 **Why not an absolute deadline.**
 A deadline in the clock's counts would be the simplest rule to state,
 but every task that sleeps would need the clock as well as the line,

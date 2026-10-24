@@ -29,6 +29,7 @@
 #include "btbb.h"
 #include "lib/child.h"
 #include "lib/libc.h"
+#include "lib/wait.h"
 #include "osi.h"
 #include "thread/mac154.h"
 
@@ -170,11 +171,11 @@ enum sending { SEND_NONE, SEND_BACKOFF, SEND_TX };
 
 struct radio {
     uint32_t note, irq, timer;
+    struct waiter wait; /* every wait on note, which arms the timer again whichever wait took its tick */
     enum state state;
     enum sending sending;
     struct mac154_csma csma;
     bool ping_due, stream_due;
-    uint32_t tick_us; /* the period the timer ticks at, which a wait of energy's arms again too, or 0 before it ticks */
     /* The frames, a length octet first, as the MAC's DMA reads and writes them. */
     uint8_t rx[1u + 127u + 1u] __attribute__((aligned(4)));
     uint8_t tx[1u + 127u] __attribute__((aligned(4)));
@@ -291,7 +292,7 @@ static void receive(struct radio *r)
 /*
  * The most energy on channel over symbols, in dBm.
  * A detection that never ends, as some did once the dump engine had taken a capture on the BLE side,
- * is given up a millisecond past its time, at a tick, which the wait arms again as the loop would, and the MAC stopped.
+ * is given up a millisecond past its time, at a tick, which the waiter arms again whichever wait takes it, and the MAC stopped.
  */
 #define ENERGY_SLACK_US 1000u
 
@@ -305,11 +306,7 @@ static int8_t energy(struct radio *r, uint32_t channel, uint32_t symbols)
     uint64_t until = osi_now_us() + symbols * 16u + ENERGY_SLACK_US;
     while (r->state == ED) {
         uint32_t bits;
-        rv_wait(r->note, &bits);
-        if ((bits & BIT_TICK) && r->tick_us != 0) {
-            uint32_t skipped;
-            must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, r->tick_us, &skipped));
-        }
+        must("wait for the radio", waiter_wait(&r->wait, BIT_RADIO | BIT_TICK, 0, &bits));
         if ((bits & BIT_RADIO) && (events_take(r) & EV_ED_DONE)) {
             r->state = IDLE;
         } else if (osi_now_us() > until) {
@@ -548,6 +545,7 @@ void i154_run(struct drv *d, struct self *own, uint32_t channel, uint32_t stream
     must("the radio's line", rv_irq_carve(d->i154_line, 0, 1, r->irq));
     must("bind the radio's line", rv_irq_bind(r->irq, own->pool, r->note, r->irq));
     must("the radio's timer", timer_bind(own, own->pool, r->note, &r->timer));
+    waiter_init(&r->wait, r->note);
 
     radio_up(d);
     drv_say("i154: up; short address %04x in PAN %04x, power index %u, acknowledgement timeout %u symbols\n",
@@ -560,21 +558,20 @@ void i154_run(struct drv *d, struct self *own, uint32_t channel, uint32_t stream
     d->channel = channel;
     child_report(&d->c, DRV_LISTENING);
     /* The timer ticks at the stream's period, or at the pings' without one. */
-    uint32_t tick_us = stream ? US_PER_S / stream : PING_US, skipped;
+    uint32_t tick_us = stream ? US_PER_S / stream : PING_US;
     uint64_t pinged_at = osi_now_us(), told_at = pinged_at;
-    must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, tick_us, &skipped));
+    must("the radio's timer", waiter_period(&r->wait, r->timer, BIT_TICK, tick_us));
     for (;;) {
         uint32_t bits;
         child_answer(&d->c);
         if (d->leave) {
             break;
         }
-        rv_wait(r->note, &bits);
+        must("wait for the radio", waiter_wait(&r->wait, BIT_RADIO | BIT_TICK, 0, &bits));
         if (bits & BIT_RADIO) {
             events(r);
         }
         if (bits & BIT_TICK) {
-            must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, tick_us, &skipped));
             r->stream_due = stream != 0;
         }
         uint64_t now = osi_now_us();
@@ -648,6 +645,7 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own, 
     must("the radio's line", rv_irq_carve(d->i154_line, 0, 1, r->irq));
     must("bind the radio's line", rv_irq_bind(r->irq, own->pool, r->note, r->irq));
     must("the radio's timer", timer_bind(own, own->pool, r->note, &r->timer));
+    waiter_init(&r->wait, r->note);
 
     radio_up(d);
     I154(CHANNEL) = FREQ(channel);
@@ -672,9 +670,8 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own, 
      * than that would fall between two samples and be told as nothing. Each tick takes a short sample, in the
      * greatest-of mode the survey uses, and the greatest of the run is what the counts are told beside.
      */
-    uint32_t tick_us = 2000u, skipped;
-    r->tick_us = tick_us;
-    must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, tick_us, &skipped));
+    uint32_t tick_us = 2000u;
+    must("the radio's timer", waiter_period(&r->wait, r->timer, BIT_TICK, tick_us));
     uint64_t told_at = osi_now_us(), second_at = told_at;
     for (;;) {
         uint32_t bits;
@@ -682,9 +679,8 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own, 
         if (d->leave) {
             break;
         }
-        rv_wait(r->note, &bits);
+        must("wait for the radio", waiter_wait(&r->wait, BIT_RADIO | BIT_TICK, 0, &bits));
         if (bits & BIT_TICK) {
-            must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, tick_us, &skipped));
             /* A short sample, and the greatest of the run kept; the receiver takes over again after it. */
             int8_t e = energy(r, channel, 8u);
             if (e > r->ed_max) {
