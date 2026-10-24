@@ -45,7 +45,7 @@ struct obj_header {
  * the second word holds the third link, to the first child, and LINK_UP.
  * For CAP_FRAME and CAP_UNTYPED a is the block, its base and size in one word as NAPOT encodes them,
  * see block_base; there is no object, and whether an Untyped is free the tree says, and untyped_going.
- * For CAP_IRQ_LINE, CAP_TIME and CAP_ROUTE_LINE a is the range, its first line, unit or channel and its count
+ * For CAP_IRQ_LINE, CAP_TIME, CAP_ROUTE_LINE and CAP_DMA_LINE a is the range, its first line, unit or channel and its count
  * in one word, see range_first; there is no object either.
  * For every other type a is the object's physical address, see cap_addr,
  * whose low bits hold, for CAP_NOTIFICATION, part of the bits the capability may signal; see notify_bits.
@@ -63,11 +63,12 @@ struct obj_header {
  * An object holds nodes outside a table too, each a capability of the type it names:
  * a process its table slots, CAP_CAPTABLE, and its region slots, CAP_FRAME,
  * a thread its process, CAP_PROCESS, its watch, CAP_NOTIFICATION, and each place's units, CAP_TIME,
- * none at all among them, an Irq its notification, CAP_NOTIFICATION, a Route its ends, CAP_FRAME,
+ * none at all among them, an Irq its notification, CAP_NOTIFICATION, a Route and a Dma their ends, CAP_FRAME,
  * and a pool its own node, CAP_POOL.
  * All but a pool's own node are leaves, which need no first child.
  * Those whose holder hears of their clearing have B_HELD set and name the holder where the first child would lie:
- * a region slot, a thread's process and its places' units, an Irq's notification and a Route's ends; see cap_holder.
+ * a region slot, a thread's process and its places' units, an Irq's notification and a Route's and a Dma's ends;
+ * see cap_holder.
  *
  * The type takes five bits and the rights three, so prev straddles the last two words, which cap_prev joins.
  */
@@ -351,9 +352,25 @@ struct route {
     uint8_t pad;
 };
 
+/*
+ * A Dma moves bytes between a frame of memory and a device through a channel of the board's DMA controller:
+ * bound at creation to its channel, connected end by end, then started on a range of its memory the kernel checks.
+ * It holds each end's frame as a Route does, so a revoke above either halts the channel before the end goes,
+ * and connecting an end anew halts it too; see DESIGN.md, "DMA".
+ * One Dma per channel.
+ */
+struct dma {
+    struct obj_header hdr;
+    uint32_t names[2];  /* each end as the board names it within its frame, 0 while it is not connected */
+    /* CAP_FRAME held by the Dma, the source's and the sink's, or CAP_NONE while that end is not connected */
+    struct cap ends[2] NODE_ALIGNED;
+    uint16_t channel;
+    uint16_t pad;
+};
+
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == NODE_ALIGN, "object layout");
-_Static_assert(CAP_ROUTE < 32, "a type fits its five bits");
+_Static_assert(CAP_DMA < 32, "a type fits its five bits");
 _Static_assert(sizeof(struct captable) == 16, "object layout");
 _Static_assert(sizeof(struct pool) == 48, "object layout");
 #ifdef BOARD_PROCESS_CSRS
@@ -372,17 +389,19 @@ _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 48, "object layout");
 _Static_assert(sizeof(struct route) == 64, "object layout");
 _Static_assert(ROUTE_EVENT == 0 && ROUTE_TASK == 1, "a Route's ends are its two nodes, by end");
+_Static_assert(sizeof(struct dma) == 64, "object layout");
+_Static_assert(DMA_SOURCE == 0 && DMA_SINK == 1, "a Dma's ends are its two nodes, by end");
 
 /*
  * True if a capability of this type names a kernel object.
- * Frames, Untypeds, interrupt lines, a router's channels, units of time and the clock name hardware,
- * a Route's ends a frame, and Print, Halt and Test nothing, so they carry no address to check.
+ * Frames, Untypeds, interrupt lines, a router's and a DMA controller's channels, units of time and the clock name hardware,
+ * a Route's and a Dma's ends a frame, and Print, Halt and Test nothing, so they carry no address to check.
  */
 static inline bool cap_has_object(uint8_t type)
 {
     return type != CAP_NONE && type != CAP_FRAME && type != CAP_UNTYPED && type != CAP_IRQ_LINE &&
            type != CAP_PRINT && type != CAP_HALT && type != CAP_TEST && type != CAP_CLOCK && type != CAP_TIME &&
-           type != CAP_ROUTE_LINE;
+           type != CAP_ROUTE_LINE && type != CAP_DMA_LINE;
 }
 
 /* The object a capability names, its address without what a Notification capability keeps in the bits below. */
@@ -455,7 +474,7 @@ static inline void notify_set(struct cap *c, paddr_t obj, uint32_t code)
 static inline bool untyped_free(const struct cap *c) { return cap_child(c) == 0 && !untyped_going(c); }
 /*
  * What an Untyped made, as OP_CAP_INFO tells it: 0 while nothing lies below it, else the type of the node first there,
- * CAP_FRAME for a frame, a region installed from one or a Route's end on one, CAP_UNTYPED for a half or a derived Untyped,
+ * CAP_FRAME for a frame, a region installed from one or a Route's or a Dma's end on one, CAP_UNTYPED for a half or a derived Untyped,
  * and CAP_POOL for a pool's own node.
  * Nothing else lies below an Untyped, as the self-check's derivation rule holds.
  */
@@ -544,7 +563,7 @@ static inline void thread_make_places(struct thread *t, uint32_t places)
 /*
  * The nodes of the derivation tree an object holds, as one array, and how many:
  * a table's slots, a process's table slots and region slots, a thread's process, watch and places' units,
- * an Irq's notification, a Route's ends, a pool's own node.
+ * an Irq's notification, a Route's and a Dma's ends, a pool's own node.
  * Other objects hold none.
  */
 static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
@@ -565,6 +584,9 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
     case CAP_ROUTE:
         *count = 2;
         return ((struct route *)o)->ends;
+    case CAP_DMA:
+        *count = 2;
+        return ((struct dma *)o)->ends;
     case CAP_POOL:
         *count = 1;
         return &((struct pool *)o)->node;
@@ -721,6 +743,8 @@ static inline size_t obj_type_size(uint8_t type, uint32_t slots)
         return sizeof(struct irq);
     case CAP_ROUTE:
         return sizeof(struct route);
+    case CAP_DMA:
+        return sizeof(struct dma);
     default:
         kpanic("size of an unknown type");
     }
@@ -746,6 +770,8 @@ static inline size_t obj_size(const struct obj_header *obj)
         return sizeof(struct irq);
     case CAP_ROUTE:
         return sizeof(struct route);
+    case CAP_DMA:
+        return sizeof(struct dma);
     default:
         kpanic("object of unknown type in pool");
     }
@@ -873,6 +899,9 @@ struct cap cap_to_time(uint32_t first, uint32_t count, uint8_t rights);
 
 /* Build a capability to a router's channels: count from first. */
 struct cap cap_to_routes(uint32_t first, uint32_t count, uint8_t rights);
+
+/* Build a capability to a DMA controller's channels: count from first. */
+struct cap cap_to_dma(uint32_t first, uint32_t count, uint8_t rights);
 
 /* The object behind a capability that names one. */
 static inline struct obj_header *cap_object(const struct cap *cap)

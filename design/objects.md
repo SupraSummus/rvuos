@@ -113,7 +113,7 @@ Where the object must hear of the node's clearing, the node names it there inste
 an installed region is a `Frame` that names its process,
 a thread's process a `Process` capability and each of its places' units a `Time` capability that name the thread,
 an `Irq`'s notification a `Notification` capability that names the `Irq`, with the bits it may signal,
-and a `Route`'s ends `Frame` capabilities that name the `Route`.
+and a `Route`'s and a `Dma`'s ends `Frame` capabilities that name the `Route` or the `Dma`.
 So the object that hears of a node's clearing is found without a walk.
 A pool's own node is a `KernelPool` capability, told from a capability to the pool by lying in the descriptor it names;
 a thread's watch and a process's table slots are capabilities as a table holds them.
@@ -133,6 +133,8 @@ a thread's watch and a process's table slots are capabilities as a table holds t
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `RouteLine` | A range of the router's channels. Bound one at a time into a `Route`. No object. |
 | `Route` | One channel wiring an event of one device to a task of another, armed or not. See "Routes". |
+| `DmaLine` | A range of the DMA controller's channels. Bound one at a time into a `Dma`. No object. |
+| `Dma` | One channel moving bytes between a frame of memory and a device, on a range the kernel checked. See "DMA". |
 | `Time` | A range of the processor's units of time. A thread runs only while bound to some, or to none with spare time. No object. |
 | `Print` | Writing into the kernel's log. No object. |
 | `Halt` | Halting the machine. No object. |
@@ -332,7 +334,7 @@ which is a slot of the same layout living in the `Process`,
 every process's table slots, which live there too,
 every thread's process, watch and each of its places' units, which live in the `Thread`,
 every `Irq`'s notification, which lives in the `Irq`,
-every `Route`'s ends, which live in the `Route`,
+every `Route`'s and every `Dma`'s ends, which live in the `Route` or the `Dma`,
 and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
 Roots are the boot capabilities but those made of the root task's memory,
@@ -352,10 +354,10 @@ a process's table slot below the `CapTable` capability the process was made with
 a thread's process below the `Process` capability the thread was made with,
 a thread's watch below the `Notification` capability it was set with,
 an `Irq`'s notification below the `Notification` capability the `Irq` was bound with,
-and a `Route`'s end below the `Frame` capability it was connected through.
+and a `Route`'s or a `Dma`'s end below the `Frame` capability it was connected through.
 A pool's own node hangs below the Untyped, and the Pool capability the retype returns below that node.
 A capability to a new object hangs below the Pool capability it was allocated through,
-and so do the `Irq` capability of `OP_IRQ_BIND` and the `Route` capability of `OP_ROUTE_BIND`,
+and so do the `Irq` capability of `OP_IRQ_BIND`, the `Route` capability of `OP_ROUTE_BIND` and the `Dma` capability of `OP_DMA_BIND`,
 whose line or channel goes with everything derived from it.
 A copy stands beside its source, under the same parent,
 so a process can duplicate what it holds without making one copy the master of the other;
@@ -894,7 +896,8 @@ Each ring has two slots for every buffer, so an honest side never finds the othe
 
 **A bus master answers to its driver alone.**
 A device that reaches memory by itself reaches all of it, PMP or not,
-and its driver is trusted as the root task is, open decision 13.
+and its driver is trusted as the root task is, open decision 13;
+a DMA controller the kernel keeps is no such device, see "DMA".
 Its connections are as safe as its own checks:
 it hands its device only buffers its end, which its parent wrote, says are the connection's,
 and once a connection is closed it stops the device using them before it says it let go,

@@ -1,0 +1,19 @@
+A Dma its pool's destroy takes stays in the channel table.
+The table would name freed memory, and the channel could never be bound again;
+the table names only live Dmas.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: dma channel table names a dma that is gone
+Witness: fuzz dma-dies-with-pool
+
+diff --git a/kernel/dma.c b/kernel/dma.c
+--- a/kernel/dma.c
++++ b/kernel/dma.c
+@@ -58,7 +58,6 @@ void dma_drop(struct cap *end)
+ void dma_forget(struct dma *d)
+ {
+     dmac_halt(d->channel);
+-    channel_dma[d->channel - DMA_FIRST] = 0;
+ }
+ 
+ #if DMA_FAKE

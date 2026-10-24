@@ -31,7 +31,8 @@ theorem sub_right {x y : Nat} (h : sub x y = true) (hx : x &&& rightR ≠ 0) : y
 /-- The type codes as numbers, for `omega`. -/
 macro "unfold_types" : tactic => `(tactic| try simp only [capNone, capFrame, capPool, capCaptable, capProcess,
   capThread, capPrint, capNotification, capUntyped, capIrqLine, capIrq, capClock, capTime, capHalt, capTest, capRouteLine,
-  capRoute, capInstalled, capRetyped, capBound, capHosted, capSignalled, capWatched, capRouted] at *)
+  capRoute, capDmaLine, capDma, capInstalled, capRetyped, capBound, capHosted, capSignalled, capWatched, capRouted,
+  capChannelled] at *)
 
 theorem kernelType_untyped {t : Nat} : kernelType t = capUntyped ↔ t = capUntyped := by
   unfold kernelType
@@ -39,7 +40,8 @@ theorem kernelType_untyped {t : Nat} : kernelType t = capUntyped ↔ t = capUnty
   all_goals unfold_types
   all_goals first | omega | (constructor <;> intro <;> first | trivial | omega)
 
-theorem kernelType_frame {t : Nat} : kernelType t = capFrame ↔ t = capFrame ∨ t = capInstalled ∨ t = capRouted := by
+theorem kernelType_frame {t : Nat} :
+    kernelType t = capFrame ↔ t = capFrame ∨ t = capInstalled ∨ t = capRouted ∨ t = capChannelled := by
   unfold kernelType
   repeat' split
   all_goals unfold_types
@@ -52,7 +54,7 @@ theorem kernelType_abi {t : Nat} (h : t < capInstalled) : kernelType t = t := by
   all_goals first | omega | (constructor <;> intro <;> first | trivial | omega)
 
 theorem State.range?_frameKind (s : State) {c : Cap} (h : kernelType c.type = capFrame) : s.range? c = some (c.a, c.b) := by
-  rcases kernelType_frame.mp h with e | e | e <;> simp [State.range?, e]
+  rcases kernelType_frame.mp h with e | e | e | e <;> simp [State.range?, e]
 
 /-- `derivedFrom`, case by case. -/
 inductive Derives (s : State) : Cap → Cap → Prop
@@ -60,7 +62,7 @@ inductive Derives (s : State) : Cap → Cap → Prop
   | untyped {c p : Cap} {b z pb pz : Nat} : p.type = capUntyped → s.range? c = some (b, z) → s.range? p = some (pb, pz) →
       (c.type = capUntyped ∨ kernelType c.type = capFrame ∨ c.type = capRetyped) →
       (sub c.rights p.rights = true ∨ c.type = capRetyped) → within b z pb pz = true → Derives s c p
-  /-- A frame, an installed region or a Route's end within a frame. -/
+  /-- A frame, an installed region or a Route's or a Dma's end within a frame. -/
   | frame {c p : Cap} : kernelType c.type = capFrame → kernelType p.type = capFrame →
       sub c.rights p.rights = true → within c.a c.b p.a p.b = true → Derives s c p
   /-- A thread's units among those of the capability it was bound through. -/
@@ -68,12 +70,13 @@ inductive Derives (s : State) : Cap → Cap → Prop
       sub c.rights p.rights = true → unitsWithin c.a c.b p.a p.b = true → Derives s c p
   /-- A range of lines, units or channels within one of its type. -/
   | range {c p : Cap} : kernelType c.type = kernelType p.type →
-      (kernelType c.type = capIrqLine ∨ kernelType c.type = capTime ∨ kernelType c.type = capRouteLine) →
+      (kernelType c.type = capIrqLine ∨ kernelType c.type = capTime ∨ kernelType c.type = capRouteLine ∨
+        kernelType c.type = capDmaLine) →
       c.type ≠ capBound → sub c.rights p.rights = true → within c.a c.b p.a p.b = true → Derives s c p
   /-- The same object, or nothing, with no more rights, and for a notification no more bits. -/
   | same {c p : Cap} : kernelType c.type = kernelType p.type → kernelType c.type ≠ capUntyped →
       kernelType c.type ≠ capFrame → kernelType c.type ≠ capIrqLine → kernelType c.type ≠ capTime →
-      kernelType c.type ≠ capRouteLine →
+      kernelType c.type ≠ capRouteLine → kernelType c.type ≠ capDmaLine →
       (sub c.rights p.rights = true ∨ p.type = capRetyped) → (namesNothing (kernelType c.type) = true ∨ c.a = p.a) →
       (kernelType c.type ≠ capNotification ∨ sub c.b p.b = true) → Derives s c p
   /-- A capability to an object below its pool's. -/
@@ -125,7 +128,8 @@ theorem derives_of (h : derivedFrom s c p = true) : Derives s c p := by
     obtain ⟨⟨hr, hn⟩, hb⟩ := h
     have hu : kernelType c.type ≠ capUntyped := by
       rw [h2]; intro e; exact h1 (kernelType_untyped.mp e)
-    refine .same h2 hu h3 (fun e => h5 (Or.inl e)) (fun e => h5 (Or.inr (Or.inl e))) (fun e => h5 (Or.inr (Or.inr e)))
+    refine .same h2 hu h3 (fun e => h5 (Or.inl e)) (fun e => h5 (Or.inr (Or.inl e)))
+      (fun e => h5 (Or.inr (Or.inr (Or.inl e)))) (fun e => h5 (Or.inr (Or.inr (Or.inr e))))
       hr hn ?_
     by_cases e : kernelType c.type = capNotification
     · exact Or.inr (hb.resolve_left (fun h' => h' e))
@@ -160,13 +164,13 @@ theorem derivedFrom_of (h : Derives s c p) : derivedFrom s c p = true := by
     rw [if_no (notU (by rw [hp]; decide)), if_yes (hct.trans hp.symm), if_no (by rw [hct]; decide), if_yes hc]
     simp [hr, hw]
   | range ht hk hb hr hw =>
-    have hcu : kernelType c.type ≠ capUntyped := by rcases hk with e | e | e <;> rw [e] <;> decide
-    have hcf : kernelType c.type ≠ capFrame := by rcases hk with e | e | e <;> rw [e] <;> decide
+    have hcu : kernelType c.type ≠ capUntyped := by rcases hk with e | e | e | e <;> rw [e] <;> decide
+    have hcf : kernelType c.type ≠ capFrame := by rcases hk with e | e | e | e <;> rw [e] <;> decide
     rw [if_no (notU (ht ▸ hcu)), if_yes ht, if_no hcf, if_no hb, if_yes hk]
     simp [hr, hw]
-  | same ht hu hf hi htm hrl hr hn hb =>
+  | same ht hu hf hi htm hrl hdl hr hn hb =>
     have hb' : c.type ≠ capBound := fun e => htm (by rw [e]; decide)
-    rw [if_no (notU (ht ▸ hu)), if_yes ht, if_no hf, if_no hb', if_no (by simp [hi, htm, hrl])]
+    rw [if_no (notU (ht ▸ hu)), if_yes ht, if_no hf, if_no hb', if_no (by simp [hi, htm, hrl, hdl])]
     simp only [Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq, bne_iff_ne, ne_eq]
     refine ⟨⟨hr, hn⟩, ?_⟩
     rcases hb with e | e
@@ -238,11 +242,11 @@ theorem Derives.trans {k n : Cap} (h₁ : Derives s k n) (h₂ : Derives s n p) 
     case bound hk hnt hr₁ hw₁ => exact .bound hk (ht ▸ hnt) (sub_trans hr₁ hr) (units_within hw₁ hw)
     case range ht₁ hk _ hr₁ hw₁ => exact .range (ht₁.trans ht) hk ‹_› (sub_trans hr₁ hr) (within_trans hw₁ hw)
     all_goals types_apart
-  | same ht hu hf hi htm hrl hr hnn hb =>
+  | same ht hu hf hi htm hrl hdl hr hnn hb =>
     cases h₁
-    case same ht₁ hu₁ hf₁ hi₁ htm₁ hrl₁ hr₁ hnn₁ hb₁ =>
+    case same ht₁ hu₁ hf₁ hi₁ htm₁ hrl₁ hdl₁ hr₁ hnn₁ hb₁ =>
       have hr₁' := hr₁.resolve_right hn
-      refine .same (ht₁.trans ht) hu₁ hf₁ hi₁ htm₁ hrl₁ (hr.imp_left (sub_trans hr₁' ·)) ?_ ?_
+      refine .same (ht₁.trans ht) hu₁ hf₁ hi₁ htm₁ hrl₁ hdl₁ (hr.imp_left (sub_trans hr₁' ·)) ?_ ?_
       · rcases hnn₁ with e | e
         · exact Or.inl e
         · rcases hnn with e' | e'
@@ -259,7 +263,7 @@ theorem Derives.trans {k n : Cap} (h₁ : Derives s k n) (h₂ : Derives s n p) 
     all_goals types_apart
   | pool hp ho hpool =>
     cases h₁
-    case same ht₁ _ _ _ _ _ _ hnn₁ _ =>
+    case same ht₁ _ _ _ _ _ _ _ hnn₁ _ =>
       have ha : k.a = n.a := hnn₁.resolve_left (by
         rw [ht₁]; revert ho; simp only [isObjectType, namesNothing, Bool.or_eq_true, beq_iff_eq]; unfold_types; omega)
       exact .pool hp (ht₁ ▸ ho) (ha ▸ hpool)
@@ -281,8 +285,8 @@ theorem Derives.narrow (h : Derives s c p) {c' : Cap} (ht : c'.type = c.type) (h
   | frame hc hp hr' hw => exact .frame (ht ▸ hc) hp (sub_trans hr hr') (ha ▸ hb ▸ hw)
   | bound hc hp hr' hw => exact .bound (ht ▸ hc) hp (sub_trans hr hr') (ha ▸ hb ▸ hw)
   | range h1 h2 h3 hr' hw => exact .range (ht ▸ h1) (ht ▸ h2) (ht ▸ h3) (sub_trans hr hr') (ha ▸ hb ▸ hw)
-  | same h1 h2 h3 h4 h5 h6 hr' hn hb' =>
-    exact .same (ht ▸ h1) (ht ▸ h2) (ht ▸ h3) (ht ▸ h4) (ht ▸ h5) (ht ▸ h6) (hr'.imp_left (sub_trans hr ·))
+  | same h1 h2 h3 h4 h5 h6 h7 hr' hn hb' =>
+    exact .same (ht ▸ h1) (ht ▸ h2) (ht ▸ h3) (ht ▸ h4) (ht ▸ h5) (ht ▸ h6) (ht ▸ h7) (hr'.imp_left (sub_trans hr ·))
       (ht ▸ ha ▸ hn) (ht ▸ hb ▸ hb')
   | pool hp ho hpool => exact .pool hp (ht ▸ ho) (ha ▸ hpool)
 
@@ -299,11 +303,12 @@ theorem Derives.masked (hty : c.type < capInstalled) (x : Nat) : Derives s { c w
   · have : kernelType c.type = capFrame := by rw [hf]; decide
     exact .frame this this (sub_mask _ _) (within_self _ _)
   have hb : c.type ≠ capBound := by unfold_types; omega
-  by_cases hrg : c.type = capIrqLine ∨ c.type = capTime ∨ c.type = capRouteLine
+  by_cases hrg : c.type = capIrqLine ∨ c.type = capTime ∨ c.type = capRouteLine ∨ c.type = capDmaLine
   · exact .range rfl (by simpa [hk] using hrg) hb (sub_mask _ _) (within_self _ _)
   simp only [not_or] at hrg
   exact .same rfl (by simpa [hk] using hu) (by simpa [hk] using hf) (by simpa [hk] using hrg.1)
-    (by simpa [hk] using hrg.2.1) (by simpa [hk] using hrg.2.2) (Or.inl (sub_mask _ _)) (Or.inr rfl) (Or.inr (sub_self _))
+    (by simpa [hk] using hrg.2.1) (by simpa [hk] using hrg.2.2.1) (by simpa [hk] using hrg.2.2.2) (Or.inl (sub_mask _ _))
+    (Or.inr rfl) (Or.inr (sub_self _))
 
 /-- An Untyped marked going is the parent it was: the mark lies where its block does not. -/
 theorem Derives.markGoing {k : Cap} (h : Derives s k c) : Derives s k c.markGoing := by
@@ -326,7 +331,7 @@ theorem Derives.objs {s' : State} (hobjs : s'.objs = s.objs) (h : Derives s c p)
   | frame h1 h2 h3 h4 => exact .frame h1 h2 h3 h4
   | bound h1 h2 h3 h4 => exact .bound h1 h2 h3 h4
   | range h1 h2 h3 h4 h5 => exact .range h1 h2 h3 h4 h5
-  | same h1 h2 h3 h4 h5 h6 h7 h8 h9 => exact .same h1 h2 h3 h4 h5 h6 h7 h8 h9
+  | same h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 => exact .same h1 h2 h3 h4 h5 h6 h7 h8 h9 h10
   | pool hp ho hpool => exact .pool hp ho (by rw [hobj]; exact hpool)
 
 end

@@ -14,7 +14,7 @@ HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
                -Ikernel/board/qemu -Ihost -Iinclude
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/core.c kernel/pool.c kernel/process.c kernel/sched.c \
-                   kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c kernel/route.c kernel/timer.c \
+                   kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c kernel/route.c kernel/dma.c kernel/timer.c \
                    kernel/arch/riscv/frame.c
 HOST_SRC        := host/shim.c host/history.c host/model.c host/mutator.c host/fuzz.c
 # What the fuzzer's coverage leaves out: the self-check and the harness only look at what the kernel did,

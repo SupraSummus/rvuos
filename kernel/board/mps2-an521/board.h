@@ -104,4 +104,15 @@
 #define ROUTE_FIRST    0u
 #define ROUTE_CHANNELS 4u
 
+/*
+ * The MPS2 boards lend no DMA controller:
+ * dma.c's stands in, four channels that move nothing,
+ * so that a Dma is bound, connected, started and revoked here as on a board with one; see DESIGN.md, "DMA".
+ */
+#define DMA_FAKE     1
+#define DMA_FIRST    0u
+#define DMA_CHANNELS 4u
+#define DMA_GRAIN    4u
+#define DMA_MOST     4096u
+
 #endif

@@ -1,0 +1,20 @@
+A start checks its range by a sum that wraps.
+An offset near 2^32 would wrap past the check, and the controller run from below the frame;
+a channel reaches only memory within its memory end's frame.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: dma's channel reaches memory beyond its memory end
+Witness: fuzz dma-starts-within-its-frame
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -970,7 +970,7 @@ static int op_dma(struct thread *t, const struct cap *cap, uint32_t op, const ui
+         }
+         /* The range lies in the memory end's frame, which holds it as long as the transfer may reach it. */
+         const struct cap *memory = &d->ends[dmac_memory(d->channel)];
+-        if (offset > block_size(memory) || length > block_size(memory) - offset) {
++        if (offset + length > block_size(memory)) {
+             return KERR_INVALID_ARG;
+         }
+         uint32_t device = dmac_memory(d->channel) == DMA_SOURCE ? DMA_SINK : DMA_SOURCE;

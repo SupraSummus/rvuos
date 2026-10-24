@@ -33,10 +33,11 @@ struct app_options {
     uint32_t (*random)(void);   /* a random word each call, for noise.h and veins.h, or 0 */
     uint32_t pictures;          /* noise.h's and veins.h's, 0 for no end */
     void *memory;               /* VEINS_MEMORY bytes for veins.h, aligned to four, or 0 */
+    uint32_t sync;              /* veins.h's pictures in step with the refresh, else as fast as they come */
 };
 
 /* The options a scene takes when none are given. */
-#define APP_OPTIONS_DEFAULT { ORIENT_ALL, LCD_BACKLIGHT_FULL, 0, 0, 0, NOISE_PICTURES, 0 }
+#define APP_OPTIONS_DEFAULT { ORIENT_ALL, LCD_BACKLIGHT_FULL, 0, 0, 0, NOISE_PICTURES, 0, 1 }
 
 /* The scene named by the n bytes at name, or -1 for none. */
 int app_scene(const char *name, uint32_t n);

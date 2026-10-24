@@ -1,4 +1,4 @@
-# rvuos design: interrupts, routes and the kernel log
+# rvuos design: interrupts, routes, DMA and the kernel log
 
 Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and the file that holds it.
 
@@ -110,6 +110,55 @@ and armed and connected are one state, which the self-check reads back from the 
 **What stands in for a router.**
 QEMU's boards and the host have four channels of `kernel/route.c` that wire nothing and take any word of a frame for an end,
 so the fuzzer and the seeds run the operations as on silicon; decision 37 says what the other chips would take.
+
+## DMA
+
+**A DMA channel moves bytes between memory and a device, and the kernel says which bytes.**
+A device that reaches memory by itself reaches all of it, PMP or not, see "A bus master answers to its driver alone",
+so a driver that held a DMA controller's registers would be trusted with all RAM, the kernel's too.
+Many chips put the masters in one controller apart from the devices they feed:
+the ESP32's GDMA, RP2350's DMA, an STM32's.
+The kernel keeps such a controller's registers, which no frame reaches,
+and lends its channels as it lends a router's:
+a `DmaLine` names a range of them and no object, the root task receives every channel lent in `BOOT_CAP_DMA`,
+and `OP_DMA_CARVE` carves single ones out; a board that lends none leaves the slot empty.
+
+**A `Dma` is a channel bound, connected and started on a range the kernel checked.**
+`OP_DMA_BIND` makes a `Dma` of one channel in a pool, as `OP_ROUTE_BIND` makes a `Route`,
+consuming the channel and failing with `KERR_OVERLAP` while another `Dma` holds it.
+`OP_DMA_END` connects its source or its sink through a `Frame` capability, with `RIGHT_R` for the source and `RIGHT_W` for the sink,
+and the end's name within it: the board says which of a channel's two ends lies in memory, which it names 0,
+and the other is a device, which a frame holding its registers whole names by the request the controller takes for it.
+`OP_DMA_START` moves the bytes at an offset and of a length within the memory end's frame,
+whole grains of the board's and no more than its longest transfer;
+the kernel checks the range and writes what the controller reads in its own memory, its descriptors on the GDMA,
+so a program that rewrites its memory meanwhile changes the bytes, never where they go.
+The device paces the transfer, and it ends once every byte has moved, which `OP_CAP_INFO` tells;
+`OP_DMA_STOP` stops it before.
+
+**Whatever takes an end away halts the channel first.**
+Each end is a node, a `Frame` that names the `Dma`, below the `Frame` capability it was connected through, as a `Route`'s is,
+so a revoke above it takes the end, and halts the channel before the memory or the device goes to anyone else;
+connecting an end anew replaces the old one the same way, and the destroy of the `Dma`'s pool halts it and frees the channel.
+Refusing such a revoke instead, while a transfer runs, would let a child keep its parent's memory by starting a transfer,
+and a transfer a device paces may never end, a receive that nothing arrives for; so the kernel stops it, which is bounded.
+A halt is the board's, and is done once it returns:
+the channel writes no memory after it, and nothing it still reads reaches a device, so a block the kernel takes back is the kernel's then.
+That is the controller's word, which `make dma-test`, `user/dma/`, holds each board's to on silicon:
+it sends through a device whose words come back to the CPU, cuts the transfer by a revoke, a new end or a stop,
+writes the memory over, and finds nothing of what it wrote come back,
+where the same run without the cut, its control, finds the channel reading on.
+A word per channel records its `Dma`, so nothing walks to find one,
+and the self-check reads the controller back: a channel that may still reach memory has both ends,
+reaches only its memory end's frame, and feeds only its device end's device; see "Properties".
+
+**What stands in for a controller.**
+QEMU's boards and the host have four channels of `kernel/dma.c` that move nothing,
+the even ones reading memory and the odd ones writing it, which take any frame for memory and any word of one for a device
+and run from a start until a halt,
+so the fuzzer and the seeds run the operations as on silicon, a start meeting a channel that still runs among them.
+The ESP32-C6 and the ESP32-C5 lend their GDMA's transmit channels and RP2350 its DMA's sixteen;
+the nRF52840 has no controller apart from its devices, whose EasyDMA lies in each device's own registers; see decision 42.
 
 ## The kernel log
 

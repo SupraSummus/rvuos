@@ -9,7 +9,7 @@ namespace Rvuos
 /-- The kernel's type of a node: the model's own types for the nodes an object holds told back as the ABI's,
 `capBound` a thread's units. -/
 def kernelType (t : Nat) : Nat :=
-  if t = capInstalled ∨ t = capRouted then capFrame
+  if t = capInstalled ∨ t = capRouted ∨ t = capChannelled then capFrame
   else if t = capRetyped then capPool
   else if t = capBound then capTime
   else if t = capHosted then capProcess
@@ -27,7 +27,8 @@ def unitsWithin (f n pf pn : Nat) : Bool := f ≥ pf && f - pf < pn && n ≤ pn 
 
 /-- `is_object_type`: a node naming an object built in a pool. -/
 def isObjectType (t : Nat) : Bool :=
-  t == capCaptable || t == capProcess || t == capThread || t == capNotification || t == capIrq || t == capRoute
+  t == capCaptable || t == capProcess || t == capThread || t == capNotification || t == capIrq || t == capRoute ||
+    t == capDma
 
 /-- A type whose capability names nothing, `Print`, `Halt`, `Test` or the clock. -/
 def namesNothing (t : Nat) : Bool := t == capPrint || t == capHalt || t == capTest || t == capClock
@@ -48,7 +49,8 @@ def derivedFrom (s : State) (c p : Cap) : Bool :=
   else if ct = pt then
     if ct = capFrame then sub c.rights p.rights && within c.a c.b p.a p.b
     else if c.type = capBound then sub c.rights p.rights && unitsWithin c.a c.b p.a p.b
-    else if ct = capIrqLine ∨ ct = capTime ∨ ct = capRouteLine then sub c.rights p.rights && within c.a c.b p.a p.b
+    else if ct = capIrqLine ∨ ct = capTime ∨ ct = capRouteLine ∨ ct = capDmaLine then
+      sub c.rights p.rights && within c.a c.b p.a p.b
     else (sub c.rights p.rights || p.type == capRetyped) && (namesNothing ct || c.a == p.a) &&
       (ct != capNotification || sub c.b p.b)
   -- Below a pool's node, and below its capability, lies every capability to the pool's objects.

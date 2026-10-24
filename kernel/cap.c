@@ -3,6 +3,7 @@
  * See DESIGN.md, "The derivation tree".
  */
 
+#include "dma.h"
 #include "kernel.h"
 #include "object.h"
 #include "route.h"
@@ -171,7 +172,7 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
 /*
  * Empty a node the tree no longer names.
  * An installed region is unmapped as well, a thread's units unbound, a thread whose process goes stopped,
- * an Irq whose notification goes disarmed, and a Route whose end goes too:
+ * an Irq whose notification goes disarmed, a Route whose end goes too, and a Dma whose end goes halted:
  * the nodes whose holder hears of their clearing.
  */
 static void clear_node(struct cap *n)
@@ -179,9 +180,12 @@ static void clear_node(struct cap *n)
     if (!cap_held(n)) {
         *n = (struct cap){ 0 };
     } else if (n->type == CAP_FRAME) {
-        /* A region of a process, or an end of a Route: the holder says which. */
-        if (((struct obj_header *)p2v(cap_holder(n)))->type == CAP_ROUTE) {
+        /* A region of a process, or an end of a Route or a Dma: the holder says which. */
+        uint8_t holder = ((struct obj_header *)p2v(cap_holder(n)))->type;
+        if (holder == CAP_ROUTE) {
             route_drop(n);
+        } else if (holder == CAP_DMA) {
+            dma_drop(n);
         } else {
             process_drop(n);
         }
@@ -376,6 +380,16 @@ struct cap cap_to_routes(uint32_t first, uint32_t count, uint8_t rights)
 {
     struct cap c = {
         .type = CAP_ROUTE_LINE,
+        .rights = rights,
+        .a = range_word(first, count),
+    };
+    return c;
+}
+
+struct cap cap_to_dma(uint32_t first, uint32_t count, uint8_t rights)
+{
+    struct cap c = {
+        .type = CAP_DMA_LINE,
         .rights = rights,
         .a = range_word(first, count),
     };

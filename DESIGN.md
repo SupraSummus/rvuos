@@ -40,6 +40,7 @@ Contents:
 - [Cores](design/cores.md#cores)
 - [Interrupts](design/io.md#interrupts)
 - [Routes](design/io.md#routes)
+- [DMA](design/io.md#dma)
 - [The kernel log](design/io.md#the-kernel-log)
 - [Boot](design/boards.md#boot)
   - [The root task is its capabilities](design/boards.md#the-root-task-is-its-capabilities)

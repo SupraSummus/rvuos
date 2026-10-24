@@ -44,6 +44,6 @@ void app_run(struct st7789 *lcd, int scene, const struct app_options *options)
     } else if (scene == APP_NOISE && options->random != 0) {
         noise_draw(lcd, options->random, options->pictures);
     } else if (scene == APP_VEINS && options->random != 0 && options->memory != 0) {
-        veins_draw(lcd, options->random, options->memory, options->pictures);
+        veins_draw(lcd, options->random, options->memory, options->pictures, options->sync);
     }
 }

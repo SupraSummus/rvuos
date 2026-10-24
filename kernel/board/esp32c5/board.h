@@ -99,6 +99,20 @@
     { U32(0x600B2800), U32(0x00000080), RIGHT_R },
 
 /*
+ * The DMA controller: the GDMA's three transmit channels, each reading memory into a device, SPI2 the one listed,
+ * whose request is 1; a transfer is whole words, and at most DMA_DESCRIPTORS of the GDMA's 4092-byte descriptors long.
+ * The C5's is AHB DMA version 2, GDMA_V2, with a window onto memory. See esp32/dma.c.
+ */
+#define DMA_FIRST        0u
+#define DMA_CHANNELS     3u
+#define DMA_GRAIN        4u
+#define DMA_DESCRIPTORS  8u
+#define DMA_MOST         (DMA_DESCRIPTORS * 4092u)
+#define GDMA_V2          1
+#define GDMA_PCR_CONF    U32(0x600960C0)
+#define GDMA_DEVICE_LIST { 1u, U32(0x60081000), U32(0x00001000) },
+
+/*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * A line is an interrupt matrix source, numbered as in Espressif's soc/interrupts.h, plus one;
  * the chip has 85 sources.

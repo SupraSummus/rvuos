@@ -24,6 +24,8 @@ abbrev capHalt : Nat := 13
 abbrev capTest : Nat := 14
 abbrev capRouteLine : Nat := 15
 abbrev capRoute : Nat := 16
+abbrev capDmaLine : Nat := 17
+abbrev capDma : Nat := 18
 /-- The nodes an object holds, by types of the model's own, never in a table; see `put_node` in `host/model.c`. -/
 abbrev capInstalled : Nat := 0x80
 abbrev capRetyped : Nat := 0x81
@@ -32,6 +34,7 @@ abbrev capHosted : Nat := 0x83
 abbrev capSignalled : Nat := 0x84
 abbrev capWatched : Nat := 0x85
 abbrev capRouted : Nat := 0x86
+abbrev capChannelled : Nat := 0x87
 
 /-! Statuses, `KERR_*`. -/
 abbrev kOk : Nat := 0
@@ -58,7 +61,7 @@ abbrev opCapRevoke : Nat := 23
 abbrev opCapDerive : Nat := 24
 abbrev opUntypedSplit : Nat := 30
 abbrev opCapInfo : Nat := 41
-abbrev opCount : Nat := 48
+abbrev opCount : Nat := 53
 
 /-! Slot numbers, `SLOT_TABLE_SHIFT` and `PROCESS_TABLES`. -/
 abbrev slotTableShift : Nat := 10
@@ -70,7 +73,7 @@ abbrev nodeSize : Nat := 16
 def capHasObject (t : Nat) : Bool :=
   !(t == capNone || t == capFrame || t == capUntyped || t == capIrqLine || t == capPrint ||
     t == capHalt || t == capTest || t == capClock || t == capInstalled || t == capTime || t == capBound ||
-    t == capRouteLine || t == capRouted)
+    t == capRouteLine || t == capRouted || t == capDmaLine || t == capChannelled)
 
 /-! What dispatch checks before a handler, `op_shapes` in `kernel/syscall.c`. -/
 abbrev shapeA1 : Nat := 0x1
@@ -130,6 +133,11 @@ def shapeOf : Nat → Shape
   | 44 => ⟨capRouteLine, rightW, shapeA1 ||| shapeA2⟩
   | 45 => ⟨capRoute, rightW, shapeA123⟩
   | 46 => ⟨capRoute, rightW, shapeA1⟩
+  | 48 => ⟨capDmaLine, 0, shapeA123⟩
+  | 49 => ⟨capDmaLine, rightW, shapeA1 ||| shapeA2⟩
+  | 50 => ⟨capDma, rightW, shapeA123⟩
+  | 51 => ⟨capDma, rightW, shapeA1 ||| shapeA2⟩
+  | 52 => ⟨capDma, rightW, 0⟩
   | _ => ⟨capNone, 0, 0⟩
 
 end Rvuos

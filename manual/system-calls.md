@@ -45,7 +45,7 @@ A slot of the invoked table, as `OP_CAP_COPY`'s destination is, is its index the
 
 The kernel checks in this order:
 the slot resolves (`KERR_INVALID_CAP`),
-then `OP_CAP_INFO`, which every type takes with no right, looks at its arguments, section 6.15;
+then `OP_CAP_INFO`, which every type takes with no right, looks at its arguments, section 6.16;
 the capability's type takes the operation (`KERR_WRONG_TYPE`);
 the capability carries the right the operation needs, as each operation below says (`KERR_NO_RIGHTS`);
 every argument of `a1` to `a3` the operation does not read is zero,
@@ -55,7 +55,7 @@ then the operation's own checks.
 Operation codes are a single flat numbering across all types,
 so invoking an `Irq` operation on a `Frame` is `KERR_WRONG_TYPE`, whatever its rights,
 not `KERR_INVALID_ARG`,
-and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COUNT` and above, section 6.16.
+and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COUNT` and above, section 6.17.
 What an operation reads its description says; three read by their own values:
 `OP_POOL_ALLOC` of a notification no `a3`, `OP_THREAD_WATCH` with no bits no `a1`,
 and `OP_IRQ_SET` with no bits, or of a line that is no timer's, no `a2` or `a3`.
@@ -205,7 +205,7 @@ The call may be made again, section 6.1.
 
 ### 6.5 Operations on `Frame` and `Untyped`
 
-`OP_CAP_INFO` tells what a frame or an Untyped covers, section 6.15.
+`OP_CAP_INFO` tells what a frame or an Untyped covers, section 6.16.
 
 **`OP_FRAME_CARVE` (5).**
 No right needed.
@@ -580,7 +580,55 @@ anything else is `KERR_INVALID_ARG`.
 While it is armed the router triggers the task each time the event comes;
 an event that came while it was disarmed triggers nothing.
 
-### 6.15 Describing a capability
+### 6.15 Operations on `DmaLine` and `Dma`
+
+A `Dma` moves bytes between a range of a frame of memory and a device through a channel of the board's DMA controller,
+which the kernel starts on a range it checked, section 5.14.
+
+**`OP_DMA_CARVE` (48).**
+No right needed.
+`a1` = offset from the first channel, `a2` = count, `a3` = destination slot.
+A table operation like `OP_ROUTE_CARVE`.
+
+**`OP_DMA_BIND` (49).**
+Needs `RIGHT_W`, and the capability must name exactly one channel (`KERR_INVALID_ARG`).
+`a1` = slot of the `KernelPool` capability to allocate the `Dma` from, with `RIGHT_W`,
+`a2` = destination slot for the `Dma` capability, which may be the invoked slot, and `a3` = 0.
+The invoked slot is cleared with everything below it,
+and the `Dma` capability hangs below the `KernelPool` capability.
+`KERR_OVERLAP` if a `Dma` is already bound to the channel,
+`KERR_NO_MEMORY` if the pool has no room for it,
+`KERR_STATE` while the pool is being destroyed,
+all checked before anything is revoked,
+and the revoke may make the call again, section 6.1.
+The new `Dma` connects nothing and moves nothing;
+its channel is free again once the `Dma`'s pool is destroyed.
+
+**`OP_DMA_END` (50).**
+Needs `RIGHT_W`.
+`a1` = the end, `DMA_SOURCE` or `DMA_SINK` (`KERR_INVALID_ARG` otherwise),
+`a2` = slot of a `Frame` capability, with `RIGHT_R` for the source and `RIGHT_W` for the sink,
+`a3` = 0 for the end the board puts in memory, or for the other the device's request, as the board names it, section 3,
+the frame holding the device's registers whole:
+`KERR_INVALID_ARG` for an end the frame does not hold, and for every end on a board that lends no channel.
+The `Dma`'s hold on the frame hangs below the named capability,
+so revoking above it takes the end and stops the channel first.
+Connecting an end again replaces it and stops the channel too.
+
+**`OP_DMA_START` (51).**
+Needs `RIGHT_W`.
+`a1` = the offset into the memory end's frame, `a2` = the length, `a3` = 0:
+both whole grains of the board's, the length at least one and at most the board's longest transfer, section 3,
+and the range within the frame; `KERR_INVALID_ARG` otherwise.
+`KERR_STATE` unless both ends are connected and no transfer may still reach the memory, as `OP_CAP_INFO` tells.
+The channel moves the bytes to or from the device, as the device takes or gives them,
+and reaches nothing beyond the range, whatever the program writes meanwhile.
+
+**`OP_DMA_STOP` (52).**
+Needs `RIGHT_W`, and `a1` to `a3` are 0.
+Stops the channel: once the call returns, no transfer reaches the memory.
+
+### 6.16 Describing a capability
 
 **`OP_CAP_INFO` (41).**
 Any capability, and no right needed.
@@ -602,6 +650,8 @@ and in `a2` to `a4` what the capability names, by its type:
 | `Time` | the first unit | the count | 0 |
 | `RouteLine` | the first channel | the count | 0 |
 | `Route` | its channel | the ends connected, bit `ROUTE_EVENT` and bit `ROUTE_TASK` | 1 while armed, else 0 |
+| `DmaLine` | the first channel | the count | 0 |
+| `Dma` | its channel | the ends connected, bit `DMA_SOURCE` and bit `DMA_SINK` | 1 while a transfer may still reach the memory, else 0 |
 | `Clock` | the counter's rate in hertz, as `OP_CLOCK_READ`'s | the default span in counts of the counter, section 5.11 | 0 |
 | `Print`, `Halt`, `Test` | 0 | 0 | 0 |
 
@@ -620,7 +670,7 @@ and a pool's room is as the call found it; a call on another core may change eit
 A pool that nothing names any more shows as `CAP_POOL` below its Untyped, until a revoke below the Untyped destroys it;
 whether something outside the pool still holds its objects it does not tell.
 
-### 6.16 Operation codes in numeric order
+### 6.17 Operation codes in numeric order
 
 | Code | Operation | Type |
 |---|---|---|
@@ -671,8 +721,13 @@ whether something outside the pool still holds its objects it does not tell.
 | 45 | `OP_ROUTE_END` | `Route` |
 | 46 | `OP_ROUTE_SET` | `Route` |
 | 47 | `OP_THREAD_OVERRUNS` | `Thread` |
+| 48 | `OP_DMA_CARVE` | `DmaLine` |
+| 49 | `OP_DMA_BIND` | `DmaLine` |
+| 50 | `OP_DMA_END` | `Dma` |
+| 51 | `OP_DMA_START` | `Dma` |
+| 52 | `OP_DMA_STOP` | `Dma` |
 
-`OP_COUNT` is 48, one above the highest code.
+`OP_COUNT` is 53, one above the highest code.
 
 ## 7. What the root task starts with
 
@@ -713,11 +768,12 @@ and drops into user mode with:
 | 18 | `BOOT_CAP_HALT` | `Halt` | all |
 | 19 | `BOOT_CAP_TEST` | `Test` | all |
 | 20 | `BOOT_CAP_ROUTES` | `RouteLine`: every channel of the board's router the kernel lends, section 5.13; empty where there is none | write |
-| 21 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, the clock's counter on QEMU; section 3 | each the board's: read and write, but read only for an eFuse and a counter, and read and execute for a ROM and a window onto flash |
+| 21 | `BOOT_CAP_DMA` | `DmaLine`: every channel of the board's DMA controller the kernel lends, section 5.14; empty where there is none | write |
+| 22 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, the clock's counter on QEMU; section 3 | each the board's: read and write, but read only for an eFuse and a counter, and read and execute for a ROM and a window onto flash |
 | after them | `BOOT_CAP_RAM_BLOCKS` | `Untyped`s: one over each further block of RAM the board sets aside for the root task, in its order, none but on the ESP32-C6; section 3 | all |
 
-`BOOT_CAP_COUNT` is 21 plus `BOOT_DEVICES` plus `BOOT_RAM_BLOCKS`, the counts in the board's `devices.h`, which `rvuos.h` includes:
-22 on QEMU and the MPS2 boards, 27 on the ESP32-C5, 27 on the nRF52840, 27 on RP2350 and 32 on the ESP32-C6.
+`BOOT_CAP_COUNT` is 22 plus `BOOT_DEVICES` plus `BOOT_RAM_BLOCKS`, the counts in the board's `devices.h`, which `rvuos.h` includes:
+23 on QEMU and the MPS2 boards, 29 on the ESP32-C5, 28 on the nRF52840, 28 on RP2350 and 33 on the ESP32-C6.
 A root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 1.6 KiB of the boot pool,

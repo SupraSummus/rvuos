@@ -15,7 +15,10 @@
  *
  * The ROM hands over the SAR ADC, a device board.h lists, with its registers held in reset, where writes are dropped,
  * and its and the temperature sensor's clocks off, as measured on the chip.
- * No program reaches PCR, so the kernel turns the clocks on and lets the registers out of reset.
+ * No program reaches PCR, so the kernel turns the clocks on and lets the registers out of reset,
+ * and does as much for SPI2, another device board.h lists, which it resets first,
+ * since a reset of the chip keeps PCR's and the controller's state alike;
+ * its function clock is PLL_F80M, 80 MHz, the most the controller takes, which the program divides further in SPI2's own registers.
  *
  * Espressif's PHY library, libphy.a in the Wi-Fi driver, also sets a few registers of the PMU and LP_AON,
  * which no program reaches, and only one way:
@@ -73,6 +76,12 @@
 #define PCR_SARADC_REG_CLK_EN (1u << 2) /* its registers' clock; bit 3 holds them in reset */
 #define PCR_TSENS_CLK_CONF    0x60096088u
 #define PCR_TSENS_CLK_EN      (1u << 22)
+/* SPI2's clocks and reset, in PCR. */
+#define PCR_SPI2_CONF         0x600960C0u
+#define PCR_SPI2_CLK_EN       (1u << 0) /* its registers' clock */
+#define PCR_SPI2_RST_EN       (1u << 1)
+#define PCR_SPI2_CLKM_CONF    0x600960C4u
+#define PCR_SPI2_CLKM_80M     ((1u << 22) | (1u << 20)) /* CLKM_EN, PLL_F80M */
 
 /* The radio's analog power, in the PMU, and the power detector's capacitance, in LP_AON. */
 #define PMU_IMM_HP_CK_POWER      0x600B00CCu
@@ -162,6 +171,9 @@ void board_init(void)
 
     REG(PCR_SARADC_CONF) = PCR_SARADC_CLK_EN | PCR_SARADC_REG_CLK_EN;
     REG(PCR_TSENS_CLK_CONF) |= PCR_TSENS_CLK_EN;
+    REG(PCR_SPI2_CONF) = PCR_SPI2_CLK_EN | PCR_SPI2_RST_EN;
+    REG(PCR_SPI2_CONF) = PCR_SPI2_CLK_EN;
+    REG(PCR_SPI2_CLKM_CONF) = PCR_SPI2_CLKM_80M;
 
     REG(PMU_RF_PWC) |= PMU_RF_I2C_ON;
     REG(PMU_IMM_HP_CK_POWER) = PMU_TIE_HIGH_XPD_BB_I2C;

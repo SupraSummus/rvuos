@@ -14,6 +14,7 @@
  * It is freestanding so that the same file serves both.
  */
 
+#include "dma.h"
 #include "irq.h"
 #include "kernel.h"
 #include "klog.h"
@@ -167,7 +168,7 @@ static void check_pools(void)
             }
             if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
                 o->type != CAP_THREAD && o->type != CAP_NOTIFICATION &&
-                o->type != CAP_IRQ && o->type != CAP_ROUTE) {
+                o->type != CAP_IRQ && o->type != CAP_ROUTE && o->type != CAP_DMA) {
                 fail("object has an unexpected type", at, o->type, 0);
             }
             prev = at;
@@ -1131,6 +1132,83 @@ static void check_channels(void)
 #endif
 }
 
+static bool range_within(uint32_t base, uint32_t size, uint32_t in, uint32_t insize);
+
+/*
+ * A Dma is bound to a channel the kernel lends, and holds each end as a Route does:
+ * empty, or a leaf below a frame, connected through a capability with the right the end needs,
+ * the right to read for the source and to write for the sink, and an end the board's controller finds that frame to hold.
+ * A transfer that may still reach memory runs only with both ends,
+ * to or from the device its device end names, over a range within its memory end's frame,
+ * read back from the controller itself and what it reads; see DESIGN.md, "DMA".
+ */
+static void check_dma(const struct dma *d)
+{
+    if (!dma_channel(d->channel)) {
+        fail("dma names a channel the kernel does not lend", v2p(d), d->channel, 0);
+    }
+    if (dma_binding(d->channel) != d) {
+        fail("dma is missing from the channel table", v2p(d), d->channel, 0);
+    }
+    for (uint32_t end = DMA_SOURCE; end <= DMA_SINK; end++) {
+        const struct cap *e = &d->ends[end];
+        if (e->type == CAP_NONE) {
+            if (d->names[end] != 0) {
+                fail("dma keeps the name of an end it does not hold", v2p(d), end, d->names[end]);
+            }
+            continue;
+        }
+        uint8_t need = end == DMA_SOURCE ? RIGHT_R : RIGHT_W;
+        uint32_t word;
+        if (e->type != CAP_FRAME || (e->rights & need) == 0) {
+            fail("dma's end names no frame it may connect", v2p(d), end, e->type);
+        }
+        /* The Dma hears of its clearing, by its name in the end. */
+        if (!cap_held(e) || cap_holder(e) != v2p(d)) {
+            fail("dma's end does not name its dma", v2p(d), end, e->b);
+        }
+        if (!dmac_end(d->channel, end, block_base(e), block_size(e), d->names[end], &word)) {
+            fail("dma's end is none the controller finds in its frame", v2p(d), end, d->names[end]);
+        }
+    }
+    uint32_t device, address, length;
+    if (!dmac_running(d->channel, &device, &address, &length)) {
+        return;
+    }
+    uint32_t mem = dmac_memory(d->channel);
+    if (d->ends[DMA_SOURCE].type == CAP_NONE || d->ends[DMA_SINK].type == CAP_NONE) {
+        fail("dma's channel runs without both its ends", v2p(d), d->ends[DMA_SOURCE].type, d->ends[DMA_SINK].type);
+    }
+    const struct cap *memory = &d->ends[mem];
+    if (length == 0 || !range_within(address, length, block_base(memory), block_size(memory))) {
+        fail("dma's channel reaches memory beyond its memory end", v2p(d), address, length);
+    }
+    if (device != dma_word(d, mem == DMA_SOURCE ? DMA_SINK : DMA_SOURCE)) {
+        fail("dma's channel moves bytes to or from another device than its own", v2p(d), d->channel, device);
+    }
+}
+
+/*
+ * The DMA channel table names only live Dmas of their own channel, which with check_dma's holding every Dma to it
+ * makes it exactly the bound Dmas, one to a channel; and no channel nothing is bound to reaches memory.
+ */
+static void check_dma_channels(void)
+{
+#if DMA_CHANNELS > 0
+    for (uint32_t c = DMA_FIRST; c < DMA_FIRST + DMA_CHANNELS; c++) {
+        const struct dma *d = dma_binding(c);
+        const struct obj_header *o = d != NULL ? object_find(v2p(d)) : NULL;
+        uint32_t device, address, length;
+        if (d != NULL && (o != &d->hdr || o->type != CAP_DMA || d->channel != c)) {
+            fail("dma channel table names a dma that is gone", c, v2p(d), 0);
+        }
+        if (d == NULL && dmac_running(c, &device, &address, &length)) {
+            fail("a dma channel nothing is bound to reaches memory", c, address, length);
+        }
+    }
+#endif
+}
+
 static void check_captable(const struct captable *table)
 {
     if (table->nslots == 0 || table->nslots > CAPTABLE_MAX_SLOTS) {
@@ -1194,6 +1272,16 @@ static void check_captable(const struct captable *table)
                 fail("route line capability with rights beyond the grant", v2p(table), i, c->rights);
             }
             break;
+        case CAP_DMA_LINE:
+            /* The root task received every channel the kernel lends, with RIGHT_W; nothing widens that. */
+            if (range_count(c) == 0 || !dma_channel(range_first(c)) ||
+                range_count(c) > DMA_FIRST + DMA_CHANNELS - range_first(c)) {
+                fail("dma line capability outside the channels lent", v2p(table), i, c->a);
+            }
+            if (c->rights & ~RIGHT_W) {
+                fail("dma line capability with rights beyond the grant", v2p(table), i, c->rights);
+            }
+            break;
         case CAP_TIME:
             /* The root task received every unit there is, with RIGHT_W and RIGHT_X; nothing widens that. */
             if (range_count(c) == 0 || range_first(c) >= MACHINE_UNITS ||
@@ -1210,7 +1298,8 @@ static void check_captable(const struct captable *table)
         case CAP_THREAD:
         case CAP_NOTIFICATION:
         case CAP_IRQ:
-        case CAP_ROUTE: {
+        case CAP_ROUTE:
+        case CAP_DMA: {
             /* A destroy sweeps the tables, so every object capability points at a live object. */
             struct obj_header *o = object_find(cap_addr(c));
             if (o == NULL || o->type != c->type) {
@@ -1234,7 +1323,7 @@ static void check_captable(const struct captable *table)
  * Its nodes are the slots of every live table,
  * the table slots and region slots of every live process,
  * the process, units and watch of every live thread,
- * the notification of every live Irq and the ends of every live Route,
+ * the notification of every live Irq and the ends of every live Route and Dma,
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
  * the children of a node form one ring that closes through the node,
@@ -1245,8 +1334,8 @@ static void check_captable(const struct captable *table)
  * A node is derived from its parent: the same object with no more rights,
  * and for a notification no more bits to signal,
  * a range within the parent's with no more rights,
- * or an object built on the parent's range, a pool on a region, an Irq or a Route on the pool it was allocated through,
- * a Route's end on a frame,
+ * or an object built on the parent's range, a pool on a region, an Irq, a Route or a Dma on the pool it was allocated through,
+ * a Route's or a Dma's end on a frame,
  * a thread's process, a thread's watch or an Irq's notification on a capability to it,
  * or a thread's units on the units it was bound through.
  */
@@ -1310,7 +1399,7 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
 static bool is_object_type(uint8_t type)
 {
     return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD || type == CAP_NOTIFICATION ||
-           type == CAP_IRQ || type == CAP_ROUTE;
+           type == CAP_IRQ || type == CAP_ROUTE || type == CAP_DMA;
 }
 
 static bool derived_from(const struct cap *c, const struct cap *p)
@@ -1345,7 +1434,7 @@ static bool derived_from(const struct cap *c, const struct cap *p)
             uint32_t off = range_first(c) - range_first(p);
             return narrower && off < range_count(p) && range_count(c) <= range_count(p) - off;
         }
-        if (c->type == CAP_IRQ_LINE || c->type == CAP_TIME || c->type == CAP_ROUTE_LINE) {
+        if (c->type == CAP_IRQ_LINE || c->type == CAP_TIME || c->type == CAP_ROUTE_LINE || c->type == CAP_DMA_LINE) {
             return narrower && range_within(range_first(c), range_count(c), range_first(p), range_count(p));
         }
         /* A notification's capability carries the bits it may signal, which narrow as rights do. */
@@ -1373,7 +1462,7 @@ static void check_words(const struct cap *n)
     if ((n->b & ~(B_LINK | spare)) != 0 ||
         (cap_has_object(n->type) && n->type != CAP_NOTIFICATION && (n->a & (NODE_ALIGN - 1)) != 0) ||
         (!cap_has_object(n->type) && n->type != CAP_FRAME && n->type != CAP_UNTYPED && n->type != CAP_IRQ_LINE &&
-         n->type != CAP_TIME && n->type != CAP_ROUTE_LINE && n->a != 0)) {
+         n->type != CAP_TIME && n->type != CAP_ROUTE_LINE && n->type != CAP_DMA_LINE && n->a != 0)) {
         fail("a node carries bits its type has no use for", v2p(n), n->a, n->b);
     }
     if (n->type == CAP_NOTIFICATION && notify_code(n) == 63) {
@@ -1609,6 +1698,9 @@ void selfcheck_run(void)
         case CAP_ROUTE:
             check_route((struct route *)o);
             break;
+        case CAP_DMA:
+            check_dma((struct dma *)o);
+            break;
         default:
             break;
         }
@@ -1629,6 +1721,7 @@ void selfcheck_run(void)
     }
     check_lines();
     check_channels();
+    check_dma_channels();
     /* Every node has been vetted as a capability by now; the tree check reads only links. */
     check_tree();
     check_nesting();

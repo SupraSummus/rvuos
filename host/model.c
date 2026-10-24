@@ -85,6 +85,7 @@ enum {
     MODEL_SIGNALLED = 0x84,
     MODEL_WATCHED = 0x85,
     MODEL_ROUTED = 0x86,
+    MODEL_CHANNELLED = 0x87,
 };
 
 /*
@@ -104,6 +105,9 @@ static void put_node(const struct obj_header *o, const struct cap *c)
         if (cap_held(c) && o->type == CAP_ROUTE) {
             type = MODEL_ROUTED;
             index = (uint32_t)(c - ((const struct route *)o)->ends);
+        } else if (cap_held(c) && o->type == CAP_DMA) {
+            type = MODEL_CHANNELLED;
+            index = (uint32_t)(c - ((const struct dma *)o)->ends);
         } else if (cap_held(c)) {
             type = MODEL_INSTALLED;
             index = (uint32_t)(c - ((const struct process *)o)->slots);
@@ -112,6 +116,7 @@ static void put_node(const struct obj_header *o, const struct cap *c)
     case CAP_IRQ_LINE:
     case CAP_TIME:
     case CAP_ROUTE_LINE:
+    case CAP_DMA_LINE:
         a = range_first(c);
         b = range_count(c);
         if (cap_held(c)) {

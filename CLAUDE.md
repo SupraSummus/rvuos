@@ -66,7 +66,10 @@ and a change to anything the demo or the escape suite exercises runs the board's
 | RP2350 in BOOTSEL mode | the same, how the cores lock, start or interrupt each other | both again with `CORES=2` | two cores on silicon |
 | nRF52840 on an ST-Link | `kernel/board/nrf52840/`, `user/board/nrf52840/`, `kernel/arch/arm/` | `make BOARD=nrf52840 test escape` | ARMv7-M on silicon |
 
-A change to `kernel/route.c` or a board's router runs `make BOARD=nrf52840 thread` as well, whose start checks a route.
+A change to `kernel/route.c` or a board's router runs `make BOARD=nrf52840 thread` as well, whose start checks a route,
+and a change to `kernel/dma.c` or a board's DMA controller runs `make BOARD=<board> dma-test` as well,
+on every board with a controller it touches, RP2350 with `ARCH=arm` too, which fails if a channel reads on after a cut,
+and `make BOARD=esp32c5 lcd` with `LCD_CONFIG="scene=veins pictures=600"`, whose pictures go out by DMA.
 
 A change to `user/thread/` or to the ESP32-C6's `user/radio/esp32c6/i154.c`, with both boards connected,
 runs `tools/thread-pair.sh`, IEEE 802.15.4's frames between them, which fails if either hears nothing of the other

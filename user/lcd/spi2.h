@@ -13,4 +13,20 @@
  */
 void spi2_configure(uint32_t mhz, uint32_t drive);
 
+/*
+ * Send data from the size bytes at base by DMA from now on, through the Dma in slot,
+ * its source a frame over those bytes and its sink SPI2, or by the CPU again for slot 0.
+ * Data that lies there, whole words of it, goes out with no more of the CPU than a start;
+ * the rest goes through SPI2's buffer as before.
+ */
+void spi2_dma(uint32_t slot, const void *base, uint32_t size);
+
+/* What spi2_dma set, which the root task keeps, as only it keeps globals; see user/build.mk. */
+struct spi2_dma {
+    uint32_t slot;
+    uintptr_t base;
+    uint32_t size;
+};
+extern struct spi2_dma spi2_dma_state;
+
 #endif

@@ -15,7 +15,7 @@ else
 ESCAPE_PROGRAMS += escape-load-scs escape-stack-call escape-unstack
 endif
 
-.PHONY: run test escape lib-test bench bench-refresh lab
+.PHONY: run test escape lib-test dma-test bench bench-refresh lab
 
 $(BUILD)/user-%.elf: $(BUILD)/user/%.o $(USER_COMMON) $(BUILD)/user/user.ld
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $< $(USER_COMMON) -o $@
@@ -51,7 +51,7 @@ escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 # Every process runs code from the one image but only the root task with its data,
 # so no other object may keep a global, which the link checks, the library's among them.
 LIB_OBJ       := $(patsubst %.c,$(BUILD)/%.o,$(wildcard user/lib/*.c))
-PROGRAMS      := wifi libtest bench lab thread observer lcd
+PROGRAMS      := wifi libtest bench lab thread observer lcd dma
 program_root   = $(BUILD)/user/$(1)/root.o
 # A program's sources: every .c and .S beside its root task, but not the root task itself.
 program_others = $(patsubst %.c,$(BUILD)/%.o,$(patsubst %.S,$(BUILD)/%.o,\
@@ -70,6 +70,12 @@ $(foreach p,$(PROGRAMS),$(eval $(call program,$(p))))
 # It runs on every board, and `make check` runs it under QEMU on both architectures.
 lib-test: $(BUILD)/kernel-libtest.$(IMAGE)
 	tests/libtest.sh "$(BOOT_PREFIX) $<"
+
+# The board's DMA controller held to what the kernel says of it, on silicon, user/dma/:
+# a transfer through a loop that hands its words back, the kernel's refusals, and a cut mid-transfer, with its control.
+# It runs on a board with a loop, see user/dma/loop.h, and halts with 0 once every check holds.
+dma-test: $(BUILD)/kernel-dma.$(IMAGE)
+	$(BOOT_PREFIX) $<
 
 # What a system call and a switch cost, user/bench/, in the core's cycles, or under QEMU in instructions.
 # A build with a record in tests/bench/, QEMU's boards', is held to it within a tenth; bench-refresh writes it.

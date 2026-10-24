@@ -47,14 +47,16 @@
  * The world is the panel's own pixels and wraps round at its edges, so that it has no walls,
  * and starts dark, every agent in one point, which bursts into a ring and the first network over the first seconds.
  *
- * It draws in sync with the refresh, the trail spreading as it goes out over the bus,
- * pictures many, or without end for 0, in memory of VEINS_MEMORY bytes the caller gives, aligned to four.
+ * It draws in sync with the refresh, or as fast as it can for sync 0, which tears, to measure it,
+ * the trail spreading as it goes out over the bus,
+ * pictures many, or without end for 0, in memory of VEINS_MEMORY bytes the caller gives, aligned to four;
+ * the bytes that go out lie at the start of it, within its first 4 KiB, so the bus may send them by DMA.
  * On the board the random words are the chip's generator's; see user/board/esp32c5/devices.h.
  */
 #define VEINS_AGENTS        12288u
 #define VEINS_MEMORY        (256u * 1024u)
 #define VEINS_BLOOM_SECONDS 20u
 
-void veins_draw(const struct st7789 *lcd, uint32_t (*random)(void), void *memory, uint32_t pictures);
+void veins_draw(const struct st7789 *lcd, uint32_t (*random)(void), void *memory, uint32_t pictures, uint32_t sync);
 
 #endif

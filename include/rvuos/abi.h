@@ -72,6 +72,8 @@
 #define CAP_TEST     14 /* driving the machine as a test does: tracing, moving the clock, interrupting, preempting */
 #define CAP_ROUTE_LINE 15 /* a range of the router's channels; no kernel object behind it */
 #define CAP_ROUTE    16 /* one channel, wiring an event of one device to a task of another */
+#define CAP_DMA_LINE 17 /* a range of the DMA controller's channels; no kernel object behind it */
+#define CAP_DMA      18 /* one channel, moving bytes between a frame of memory and a device */
 
 /*
  * Rights bits.
@@ -91,6 +93,8 @@
  * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
  * RouteLine: RIGHT_W to bind a channel.
  * Route: RIGHT_W to connect its ends and to arm it.
+ * DmaLine: RIGHT_W to bind a channel.
+ * Dma: RIGHT_W to connect its ends, to start it and to stop it.
  * Print: RIGHT_W to write into the kernel's log.
  * Halt: RIGHT_W to halt the machine.
  * Test: RIGHT_W to drive the machine as a test does: trace, move the clock, interrupt, preempt.
@@ -653,6 +657,9 @@
  *                     unit u is of core u / TIME_UNITS, so BOOT_CAP_TIME's count is TIME_UNITS for each core the kernel runs
  *   CAP_ROUTE_LINE    the first channel, the count, and 0
  *   CAP_ROUTE         its channel, the ends connected, bit ROUTE_EVENT and bit ROUTE_TASK, and 1 while armed, else 0
+ *   CAP_DMA_LINE      the first channel, the count, and 0
+ *   CAP_DMA           its channel, the ends connected, bit DMA_SOURCE and bit DMA_SINK,
+ *                     and 1 while a transfer may still reach its memory, else 0
  *   CAP_CLOCK         the counter's rate in Hz, as OP_CLOCK_READ gives it, the default span in counts of the counter,
  *                     the longest power of two within a millisecond, see OP_TIME_BIND, and 0
  *   CAP_PRINT, CAP_HALT and CAP_TEST  0, 0, 0
@@ -666,7 +673,7 @@
 /*
  * Pool: what an object of a type would take of it. No right needed, as for OP_CAP_INFO.
  * a1 = the type: CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD or CAP_NOTIFICATION, as OP_POOL_ALLOC makes them,
- *      CAP_IRQ, as OP_IRQ_BIND makes one of a pool, CAP_ROUTE, as OP_ROUTE_BIND does,
+ *      CAP_IRQ, as OP_IRQ_BIND makes one of a pool, CAP_ROUTE, as OP_ROUTE_BIND does, CAP_DMA, as OP_DMA_BIND does,
  *      or CAP_POOL, the descriptor at the base of a pool's memory;
  * a2 = 0; a3 = the number of slots for CAP_CAPTABLE, 1 to 1024, of region slots for CAP_PROCESS,
  * 1 to the most the machine allows, see OP_CAP_INFO, of places for CAP_THREAD, 1 to the machine's cores,
@@ -736,11 +743,63 @@
 #define OP_THREAD_OVERRUNS 47
 
 /*
+ * DmaLine: derive a smaller range of channels with the same rights.
+ * a1 = offset from the first channel, a2 = count, a3 = destination slot.
+ * Like OP_ROUTE_CARVE, this is a table operation that touches no kernel memory,
+ * and the new capability is a child of the invoked one.
+ */
+#define OP_DMA_CARVE 48
+/*
+ * DmaLine (RIGHT_W): bind the one channel the capability names, as a Dma object,
+ * which moves bytes between a frame of memory and a device once both are connected and it is started;
+ * see DESIGN.md, "DMA".
+ * a1 = the slot of the Pool capability the Dma is allocated from, which needs RIGHT_W,
+ * a2 = destination slot for the Dma capability, a3 = 0.
+ * As OP_ROUTE_BIND, the bind consumes the invoked slot, and what was derived from it, so a2 may name it,
+ * and the Dma capability is a child of the Pool capability.
+ * Fails with KERR_OVERLAP if a Dma is already bound to the channel;
+ * the channel is free again once that Dma's pool is destroyed.
+ * Fails with KERR_NO_MEMORY if the pool has no room for the Dma, and with KERR_STATE while it is being destroyed.
+ * The new Dma connects nothing and moves nothing.
+ */
+#define OP_DMA_BIND 49
+/*
+ * Dma (RIGHT_W): connect one end of the channel; connecting an end it had stops the channel.
+ * a1 = DMA_SOURCE or DMA_SINK, which end; the board says which of the two a channel takes in memory,
+ *      and the other is a device; see MANUAL.md, section 3,
+ * a2 = the slot of a Frame capability over the memory or the device, which needs RIGHT_R for the source
+ *      and RIGHT_W for the sink,
+ * a3 = 0 for memory, or the device's request as the board names it, for a device the frame holds whole.
+ * Fails with KERR_INVALID_ARG for an end the frame does not hold, or any end on a board that lends no channel.
+ * The Dma holds the frame by a capability derived from the one named, which a revoke above takes,
+ * as it takes the end, stopping the channel first; connecting the end again replaces it, and stops it too.
+ */
+#define OP_DMA_END 50
+#define DMA_SOURCE 0
+#define DMA_SINK   1
+/*
+ * Dma (RIGHT_W): start a transfer between the device and the bytes [a1, a1 + a2) of the memory end's frame,
+ * a1 = the offset, a2 = the length, a3 = 0.
+ * Both are multiples of the board's grain, the length at least one grain and at most the board's longest transfer;
+ * see MANUAL.md, section 3. Anything else fails with KERR_INVALID_ARG.
+ * Fails with KERR_STATE unless both ends are connected and no transfer may still reach the memory.
+ * The kernel checks the range and writes what the controller reads of it in its own memory,
+ * so the channel reaches nothing beyond the range whatever the program does meanwhile;
+ * the device paces it, and the transfer ends once every byte is moved, which OP_CAP_INFO tells.
+ */
+#define OP_DMA_START 51
+/*
+ * Dma (RIGHT_W): stop the channel; once the call returns no transfer reaches the memory. a1 to a3 are zero.
+ * A revoke of either end's frame, and the destroy of the Dma's pool, stop it the same way.
+ */
+#define OP_DMA_STOP 52
+
+/*
  * One above the highest operation code; the fuzzer's mutator draws below it.
  * Codes 11, 26 and 27 are no operation's: 11 and 27 were OP_FRAME_INFO and OP_UNTYPED_INFO, which OP_CAP_INFO replaced,
  * and 26 OP_CLOCK_FRAME, the counter's frame, which a board grants as a device instead; see DESIGN.md, decision 41.
  */
-#define OP_COUNT 48
+#define OP_COUNT 53
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -782,18 +841,23 @@
  */
 #define BOOT_CAP_ROUTES    20
 /*
+ * DmaLine: every channel of the board's DMA controller the kernel lends, with RIGHT_W;
+ * empty on a board that lends none. See DESIGN.md, "DMA".
+ */
+#define BOOT_CAP_DMA       21
+/*
  * Frames over the devices the board lists, BOOT_DEVICES of them, from this slot up in the board's order;
  * QEMU's lists one, its counter.
  * BOOT_DEVICES comes from the kernel's board.h, or a program's devices.h, which names each slot.
  */
-#define BOOT_CAP_DEVICES   21
+#define BOOT_CAP_DEVICES   22
 /*
  * Untypeds over the further blocks of RAM the board sets aside for the root task, beside BOOT_CAP_FREE_RAM's,
  * BOOT_RAM_BLOCKS of them, from this slot up in the board's order; QEMU's lists none.
  * BOOT_RAM_BLOCKS comes from the kernel's board.h, or a program's devices.h, as BOOT_DEVICES does.
  */
 #define BOOT_CAP_RAM_BLOCKS (BOOT_CAP_DEVICES + BOOT_DEVICES)
-/* The root task's own slots start here; on QEMU it is 22. */
+/* The root task's own slots start here; on QEMU it is 23. */
 #define BOOT_CAP_COUNT     (BOOT_CAP_RAM_BLOCKS + BOOT_RAM_BLOCKS)
 
 /*
@@ -856,7 +920,7 @@ struct replay_record {
 /* The most region slots a process has on any machine; OP_CAP_INFO on a process tells this machine's. */
 #define PROCESS_REGION_SLOTS_MAX 16
 #define PROCESS_TABLES 2 /* table slots per process, see SLOT_TABLE_SHIFT */
-#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 68 on QEMU */
+#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 69 on QEMU */
 /* Region slots of the root task's process, or the most a process may have where that is fewer; see OP_CAP_INFO. */
 #define ROOT_REGION_SLOTS 8
 #define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */

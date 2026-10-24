@@ -327,6 +327,9 @@ what is left:
 - Whether a misaligned access is checked by halves, as the ESP32-C6's erratum DIG-694 has it:
   `PMP_SPLIT_STORE_AS_READ` stays set until a test shows either; the escape suite passes with it.
 - `make BOARD=esp32c5 bench` and `lib-test` were not run; the bench needs records of its own.
+- The kernel built with `SELFCHECK=1` no longer fits below its log, 60 KiB, here or on the ESP32-C6:
+  the DMA's checks and the GDMA's driver took the last of it.
+  The self-check reads the GDMA back, so `make dma-test` on such a kernel would hold the channels to it on silicon.
 
 ## RP2350
 
@@ -335,6 +338,7 @@ what is left:
   though it matches the region written; the specification reads them as ones.
   So the self-check's reading of the CSRs, which runs only under tracing and is built into the board's kernel only with `SELFCHECK=1`,
   would take every region there for eight bytes; `pmp_get` could set those bits, as it swaps R and X.
+  So a traced `make BOARD=rp2350 SELFCHECK=1 dma-test` stops at its first call there, and runs on the Cortex-M33 alone.
 - The bench's threads round costs more while the console's port is open,
   though nothing the cores run touches the controller during a round,
   and the same image with the controller left off the bus costs what it did.
@@ -614,8 +618,16 @@ what is left:
 - RP2350's DMA as a router, a channel paced by a device's DREQ writing a word to a register; decision 37.
 - Check a route in `make BOARD=nrf52840 test`, the demo, rather than at `user/thread/`'s start alone,
   so that the board's ordinary check holds the router; QEMU's wires nothing, so only a board can.
-- Renumber the corpus past `BOOT_CAP_ROUTES`, whose slot moved the devices and the root task's own slots up one,
+- Renumber the corpus past `BOOT_CAP_ROUTES` and `BOOT_CAP_DMA`, whose slots each moved the devices and the root task's own slots up one,
   as the item under "Verification" on renumbering says.
+
+## DMA
+
+- The GDMA's receive channels, which write memory, for SPI2's reads and an ADC's samples, and RP2350's from a PIO block's receive FIFOs:
+  a halt must be known to stop the channel's last write before the kernel lets go of the memory, measured on the board;
+  `make dma-test`'s loop on RP2350 would measure it as it does a transmit channel's.
+- A transfer's end as an interrupt the kernel signals, so a driver that holds no register of its device's that says so can wait; decision 42.
+- RP2350's DMA reaches more devices than the PIO blocks, SPI, UART, PWM and HSTX among them, which no frame of the board's holds yet.
 
 ## System calls
 

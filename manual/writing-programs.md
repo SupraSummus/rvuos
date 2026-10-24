@@ -412,7 +412,7 @@ trace: op=0x00000007 slot=0x00000004 a1=0x00000007 a2=0x0000000d a3=0x00000000 -
 
 with `blocked` in place of a status when the call blocked,
 `trace: info a1=... a2=...` after a describing call that succeeded, with its results,
-four words for `OP_CAP_INFO` and two for `OP_POOL_INFO`, section 6.15,
+four words for `OP_CAP_INFO` and two for `OP_POOL_INFO`, section 6.16,
 and `trace: wake <bits>` after a call that woke a waiter,
 or after the `user fault` of a thread whose watch woke one.
 A call stopped where `OP_TEST_PREEMPT` armed prints `trace: preempt` instead of its line,

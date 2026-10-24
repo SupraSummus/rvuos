@@ -48,6 +48,9 @@
 /* Pictures a second, as the board is meant to draw them, every other refresh, which the times here are counted in. */
 #define PICTURE_RATE 30u
 
+/* The rows of the picture a push sends at once, a turn of the dither's four, and whole words of the panel's colours. */
+#define PUSH_ROWS 4u
+
 struct agent {
     uint16_t x, y;
     uint8_t heading, spare;
@@ -87,6 +90,11 @@ struct rule {
 };
 
 struct veins {
+    /*
+     * The picture's next rows in the panel's colours, in two buffers that take turns, one going out while the next is worked out;
+     * first, so that they lie at the start of the memory, which a caller may have the bus send from by DMA.
+     */
+    uint16_t out[2][PUSH_ROWS * W];
     uint16_t trail[W * H];
     struct agent agents[VEINS_AGENTS];
     /* The tone curve in the panel's colours, high byte first, one for each place of a 4 by 4 Bayer matrix. */
@@ -108,6 +116,7 @@ struct veins {
 };
 
 _Static_assert(sizeof(struct veins) <= VEINS_MEMORY, "veins.h's memory holds the world");
+_Static_assert(sizeof(((struct veins *)0)->out) <= 4096u, "veins.h's bytes that go out lie in its first 4 KiB");
 
 /* sin over a quarter turn, at 64 steps, in 32767ths. */
 static const uint16_t quarter[65] = {
@@ -346,14 +355,12 @@ static uint32_t exposure(const struct veins *v)
  * and is drawn through the tone curve at the exposure gain.
  * It works in place, a row at a time, the sums of the three columns round a pixel moving along with it
  * and the row above as it was kept aside, and counts the trail's mass for the next picture's exposure.
- * The pixels go out PUSH_PIXELS at a time, over the bus while the next are worked out; see bus.h.
+ * The pixels go out PUSH_ROWS rows at a time, over the bus while the next are worked out into the other buffer;
+ * see bus.h.
  */
-#define PUSH_PIXELS 32u
-
 static void spread(struct veins *v, const struct st7789 *lcd, uint32_t keep, uint32_t gain)
 {
-    _Alignas(4) uint16_t out[PUSH_PIXELS];
-    uint32_t k = keep / 18u, mass = 0;
+    uint32_t k = keep / 18u, mass = 0, turn = 0;
     uint16_t *above = v->rows[0], *kept = v->rows[1];
     copy_row(v->first, v->trail);
     copy_row(above, v->trail + (H - 1u) * W);
@@ -364,22 +371,22 @@ static void spread(struct veins *v, const struct st7789 *lcd, uint32_t keep, uin
         const uint16_t(*lut)[LUT_SIZE] = &v->lut[(y & 3u) * 4u];
         uint32_t left = (uint32_t)above[W - 1u] + row[W - 1u] + below[W - 1u];
         uint32_t middle = (uint32_t)above[0] + row[0] + below[0], first = middle;
-        for (uint32_t x = 0; x < W; x += PUSH_PIXELS) {
-            uint32_t n = W - x < PUSH_PIXELS ? W - x : PUSH_PIXELS;
-            for (uint32_t j = 0; j < n; j++) {
-                uint32_t at = x + j;
-                uint32_t right = at + 1u < W ? (uint32_t)above[at + 1u] + row[at + 1u] + below[at + 1u] : first;
-                uint32_t here = row[at];
-                kept[at] = (uint16_t)here;
-                uint32_t t = (left + middle + right + 9u * here) * k >> 15;
-                row[at] = (uint16_t)t;
-                mass += t;
-                left = middle;
-                middle = right;
-                uint32_t i = t * gain >> 16;
-                out[j] = lut[at & 3u][i < LUT_SIZE ? i : LUT_SIZE - 1u];
-            }
-            st7789_pixels((const uint8_t *)out, 2u * n);
+        uint16_t *out = &v->out[turn][(y % PUSH_ROWS) * W];
+        for (uint32_t at = 0; at < W; at++) {
+            uint32_t right = at + 1u < W ? (uint32_t)above[at + 1u] + row[at + 1u] + below[at + 1u] : first;
+            uint32_t here = row[at];
+            kept[at] = (uint16_t)here;
+            uint32_t t = (left + middle + right + 9u * here) * k >> 15;
+            row[at] = (uint16_t)t;
+            mass += t;
+            left = middle;
+            middle = right;
+            uint32_t i = t * gain >> 16;
+            out[at] = lut[at & 3u][i < LUT_SIZE ? i : LUT_SIZE - 1u];
+        }
+        if (y % PUSH_ROWS == PUSH_ROWS - 1u || y + 1u == H) {
+            st7789_pixels((const uint8_t *)v->out[turn], 2u * W * (y % PUSH_ROWS + 1u));
+            turn ^= 1u;
         }
         uint16_t *swap = above;
         above = kept;
@@ -504,7 +511,7 @@ static void chance(struct veins *v, uint32_t (*random)(void), uint32_t picture)
     }
 }
 
-void veins_draw(const struct st7789 *lcd, uint32_t (*random)(void), void *memory, uint32_t pictures)
+void veins_draw(const struct st7789 *lcd, uint32_t (*random)(void), void *memory, uint32_t pictures, uint32_t sync)
 {
     struct veins *v = memory;
     start(v, random);
@@ -515,7 +522,9 @@ void veins_draw(const struct st7789 *lcd, uint32_t (*random)(void), void *memory
         aim(v, r.reach);
         move(v, &r);
         feed(v);
-        st7789_sync();
+        if (sync) {
+            st7789_sync();
+        }
         spread(v, lcd, r.keep, exposure(v));
     }
 }

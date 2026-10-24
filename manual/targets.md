@@ -59,7 +59,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x0200BFE0` | 32 B | the CLINT's words that end with `mtime`, 10 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 21 |
+| `0x0200BFE0` | 32 B | the CLINT's words that end with `mtime`, 10 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 22 |
 | `0x10000000` | 256 B | 16550 UART registers, granted to the root task |
 | `0x80000000` to `0x800FF000` | just under 1 MiB | kernel code, data and stack |
 | `0x800FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
@@ -80,12 +80,17 @@ Interrupt lines:
 | 0 | the kernel log (no controller behind it) |
 | 1 to 95 | the PLIC's sources; the UART is line 10 |
 
-`BOOT_CAP_COUNT` is 22 here and the root task's table has 68 slots.
+`BOOT_CAP_COUNT` is 23 here and the root task's table has 69 slots.
 The kernel has no tick: the CLINT's compare is set for the first count that could change what runs.
 QEMU's PMP has sixteen entries and a four-byte grain.
 `BOOT_CAP_ROUTES` names four channels of a router that wires nothing, as on the MPS2 boards and the host,
 so that a program's routes are bound, connected, armed and revoked here as on a board with a router;
 any word of a frame is an end, an event or a task alike.
+`BOOT_CAP_DMA` names four channels of a DMA controller that moves nothing, as on the MPS2 boards and the host,
+so that a program's `Dma`s are bound, connected, started and revoked here as on a board with one:
+channels 0 and 2 read memory, their source, and 1 and 3 write it, their sink,
+any frame is memory and any word of one a device, a transfer is whole words and at most 4096 bytes,
+and it runs from its start until a stop.
 
 #### ESP32-C6
 
@@ -134,33 +139,43 @@ Interrupt lines:
 | 1 to 77 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 49 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-and after them, in slot 31, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
-so `BOOT_CAP_COUNT` is 32 here and the root task's table has 78 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
+and after them, in slot 33, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
+so `BOOT_CAP_COUNT` is 34 here and the root task's table has 80 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
 They are the SAR ADC and the whole modem,
 where `make BOARD=esp32c6 phymap` and `make BOARD=esp32c6 wifi-esp32c6-map` find what ESP-IDF's PHY and Wi-Fi libraries reach,
 the eFuse's registers, the window onto flash, the ROM, the random number generator's data register,
-the IO MUX and the GPIO matrix, HP_SYSTEM, and the clock's counter:
+the IO MUX and the GPIO matrix, HP_SYSTEM, the clock's counter, and SPI2:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
-| 21 | `BOOT_CAP_SARADC` | `0x6000E000` | 4 KiB | APB_SARADC, the SAR ADC and the temperature sensor | read, write |
-| 22 | `BOOT_CAP_MODEM` | `0x600A0000` | 64 KiB | the modem: its RF front end, basebands and MACs, MODEM_SYSCON and MODEM_LPCON, its clocks and resets, and the analog I2C master from `0x600AF800` | read, write |
-| 23 | `BOOT_CAP_EFUSE` | `0x600B0800` | 1 KiB | the eFuse's registers, the factory MAC address among them | read |
-| 24 | `BOOT_CAP_FLASH` | `0x42000000` | 1 MiB | the window onto flash, for a program larger than the SRAM | read, execute |
-| 25 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM, whose functions ESP-IDF's libraries call | read, execute |
-| 26 | `BOOT_CAP_RNG` | `0x600B2808` | 8 bytes | LPPERI's RNG_DATA, the random number generator, whose entropy comes from the radio while it runs | read |
-| 27 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
-| 28 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
-| 29 | `BOOT_CAP_HP_SYSTEM` | `0x60095000` | 4 KiB | HP_SYSTEM, whose `SRAM_USAGE` gives a 128 KiB bank of SRAM to the modem's dump engine | read, write |
-| 30 | `BOOT_CAP_COUNTER` | `0x20001C08` | 8 bytes | the CLINT's `UTIME`, a copy of `mtime` for user mode at the CPU clock, 160 MHz, the clock's counter | read |
+| 22 | `BOOT_CAP_SARADC` | `0x6000E000` | 4 KiB | APB_SARADC, the SAR ADC and the temperature sensor | read, write |
+| 23 | `BOOT_CAP_MODEM` | `0x600A0000` | 64 KiB | the modem: its RF front end, basebands and MACs, MODEM_SYSCON and MODEM_LPCON, its clocks and resets, and the analog I2C master from `0x600AF800` | read, write |
+| 24 | `BOOT_CAP_EFUSE` | `0x600B0800` | 1 KiB | the eFuse's registers, the factory MAC address among them | read |
+| 25 | `BOOT_CAP_FLASH` | `0x42000000` | 1 MiB | the window onto flash, for a program larger than the SRAM | read, execute |
+| 26 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM, whose functions ESP-IDF's libraries call | read, execute |
+| 27 | `BOOT_CAP_RNG` | `0x600B2808` | 8 bytes | LPPERI's RNG_DATA, the random number generator, whose entropy comes from the radio while it runs | read |
+| 28 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
+| 29 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
+| 30 | `BOOT_CAP_HP_SYSTEM` | `0x60095000` | 4 KiB | HP_SYSTEM, whose `SRAM_USAGE` gives a 128 KiB bank of SRAM to the modem's dump engine | read, write |
+| 31 | `BOOT_CAP_COUNTER` | `0x20001C08` | 8 bytes | the CLINT's `UTIME`, a copy of `mtime` for user mode at the CPU clock, 160 MHz, the clock's counter | read |
+| 32 | `BOOT_CAP_SPI2` | `0x60081000` | 4 KiB | SPI2, the general-purpose SPI controller | read, write |
 
 The modem's two MACs, Wi-Fi's from `0x600A4000` and 802.15.4's at `0x600A3000`, are bus masters, and nothing confines them:
 a program that holds the modem's frame reaches all RAM, the kernel's too,
 so the root task gives it only to a driver it trusts as it trusts itself; see `DESIGN.md`, open decision 13.
 The modem's dump engine, from `0x600A9000`, writes what the receiver hears into whichever bank `HP_SYSTEM` gives it,
 the kernel's too, so whoever holds both reaches all RAM as well.
-PCR, PMU and the LP domain are not listed.
+PCR, PMU and the LP domain are not listed, nor the GDMA, which is the kernel's.
+`BOOT_CAP_DMA` names the GDMA's three transmit channels, 0 to 2, section 5.14,
+each reading memory, its source, named 0, which may be any of the SRAM a frame holds,
+into a device, its sink, named by the request the GDMA takes for it, through a frame over the device's registers whole:
+SPI2 is request 0, `DMA_REQUEST_SPI2` in `devices.h`, the one device listed that the GDMA feeds.
+A transfer is whole words, from a word of the frame, and at most 32736 bytes, eight of the GDMA's descriptors.
 The kernel takes the SAR ADC out of the reset the ROM leaves it in and turns its clocks on.
+SPI2's clocks lie in PCR too, so the kernel sets them at boot: its master clock runs at 80 MHz, PLL_F80M,
+which a program divides further in SPI2's `SPI_CLOCK`, and turns on in SPI2's own `SPI_CLK_GATE`,
+and the controller comes out of a reset of its own, whatever the last program left in it.
+It sends what the CPU writes into its 64-byte buffer, or, by a channel of `BOOT_CAP_DMA`, what the GDMA reads of memory.
 It also powers the radio's analog I2C buses and sets the power detector's capacitance, in the PMU and LP_AON,
 as ESP-IDF's PHY library would;
 a PHY driver leaves out its own writes there, as `user/radio/esp32c6/phy.c` does.
@@ -241,31 +256,41 @@ Interrupt lines:
 | 1 to 85 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 55 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-and after them, in slot 27, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
-so `BOOT_CAP_COUNT` is 28 here and the root task's table has 74 slots:
+and after them, in slot 28, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
+so `BOOT_CAP_COUNT` is 29 here and the root task's table has 75 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
-| 21 | `BOOT_CAP_EFUSE` | `0x600B4800` | 1 KiB | the eFuse's registers, the factory MAC address among them, short of the OTP debug registers above them | read |
-| 22 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM | read, execute |
-| 23 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
-| 24 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
-| 25 | `BOOT_CAP_SPI2` | `0x60081000` | 4 KiB | SPI2, the general-purpose SPI controller, which drives the board's LCD | read, write |
-| 26 | `BOOT_CAP_RNG` | `0x600B2800` | 128 B | LPPERI's first words, the PMP's grain, which hold the random number generator's: `RNG_DATA_SYNC` at `0x28`, a new word at every read, and `RNG_CFG` at `0x24` | read |
+| 22 | `BOOT_CAP_EFUSE` | `0x600B4800` | 1 KiB | the eFuse's registers, the factory MAC address among them, short of the OTP debug registers above them | read |
+| 23 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM | read, execute |
+| 24 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
+| 25 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
+| 26 | `BOOT_CAP_SPI2` | `0x60081000` | 4 KiB | SPI2, the general-purpose SPI controller, which drives the board's LCD | read, write |
+| 27 | `BOOT_CAP_RNG` | `0x600B2800` | 128 B | LPPERI's first words, the PMP's grain, which hold the random number generator's: `RNG_DATA_SYNC` at `0x28`, a new word at every read, and `RNG_CFG` at `0x24` | read |
 
-The modem is not listed yet, nor PCR, PMU and the LP domain beyond the random number generator's words, nor the GDMA.
+The modem is not listed yet, nor PCR, PMU and the LP domain beyond the random number generator's words, nor the GDMA, which is the kernel's.
+`BOOT_CAP_DMA` names the GDMA's three transmit channels, 0 to 2, section 5.14,
+each reading memory, its source, named 0, which may be any of the SRAM a frame holds,
+into a device, its sink, named by the request the GDMA takes for it, through a frame over the device's registers whole:
+SPI2 is request 1, `DMA_REQUEST_SPI2` in `devices.h`, the one device listed that the GDMA feeds.
+A transfer is whole words, from a word of the frame, and at most 32736 bytes, eight of the GDMA's descriptors;
+the GDMA's own window keeps every channel within the SRAM besides.
 The kernel has the generator sample its ring oscillator, as ESP-IDF does at its start, besides the two timers it stirs in as the ROM leaves it;
 its noise from the SAR ADC and the radio comes only while they run, which nothing yet makes them do on this chip,
 and its words look random whether it samples or not, so how much entropy they carry is not known.
 SPI2's clocks lie in PCR, so the kernel sets them at boot: its master clock runs at 80 MHz, PLL_F160M halved,
 which a program divides further in SPI2's `SPI_CLOCK`, and the controller comes out of a reset of its own, whatever the last program left in it.
-Without the GDMA it sends only what the CPU writes into its 64-byte buffer, a transfer at a time.
+It sends what the CPU writes into its 64-byte buffer, a transfer at a time,
+or, by a channel of `BOOT_CAP_DMA`, a transfer from memory of up to the GDMA's longest,
+with its `SPI_DMA_CONF` set to take its data from the GDMA.
 `user/lcd/` drives the LCD of Waveshare's board with it, an ST7789 of 172 by 320 pixels,
 and renders on the host, against a model of the LCD, what it shows: `make lcd-sim`.
 `make BOARD=esp32c5 lcd LCD_CONFIG="scene=stress mhz=80"` runs it on the board, its scene and its bus's clock as named;
 `scene=noise` draws snow from the random number generator, 600 pictures, or `pictures=` as many, `pictures=0` without end.
 `scene=veins` grows a network of glowing threads from it, a slime mould's, as many pictures,
-in 256 KiB of the free RAM and the further block below it, which take the region slots of the input and the IO MUX once the pins are set up.
+in 256 KiB of the free RAM and the further block below it, which take the region slots of the input and the IO MUX once the pins are set up,
+its pictures going out by DMA from the further block, or through SPI2's buffer for `dma=0`,
+and as fast as it can draw them for `sync=0`, torn, rather than every other refresh.
 GPIO_EXT, with its sigma-delta modulator, lies in the GPIO's own page, on the IO MUX's clock, which the kernel leaves as the chip starts,
 so a program that holds the GPIO can drive a pin at a density of its own; `user/lcd/` dims the backlight so.
 The flash's pins are in the IO MUX, so a program that holds it can cut the flash off, the root task's code with it,
@@ -320,19 +345,25 @@ Interrupt lines:
 | 26 | SIO's doorbell; on the Cortex-M33 with `CORES=2` the kernel's, for its cores, and an `Irq` cannot be bound to it |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots, and `BOOT_CAP_ROUTES` is empty, since it has no router;
+so `BOOT_CAP_COUNT` is 28 here and the root task's table has 74 slots, and `BOOT_CAP_ROUTES` is empty, since it has no router;
 the kernel takes each device out of reset at boot and opens it to user mode in ACCESSCTRL,
 and on the RISC-V cores opens every pin to Non-secure access, which is how user mode reaches the bus there:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
-| 21 | `BOOT_CAP_IO_BANK0` | `0x40028000` | 16 KiB | IO_BANK0, the pins' functions, overrides and interrupts | read, write |
-| 22 | `BOOT_CAP_PADS_BANK0` | `0x40038000` | 16 KiB | PADS_BANK0, the pins' pads | read, write |
-| 23 to 25 | `BOOT_CAP_PIO0` to `BOOT_CAP_PIO2` | `0x50200000`, `0x50300000`, `0x50400000` | 16 KiB each | PIO0, PIO1 and PIO2 | read, write |
-| 26 | `BOOT_CAP_COUNTER` | `0x400B0020` | 32 bytes | TIMER0's, `TIMERAWL` at 8 into them, 1 MHz, the clock's counter on either kind of core; the word below it is the high half | read |
+| 22 | `BOOT_CAP_IO_BANK0` | `0x40028000` | 16 KiB | IO_BANK0, the pins' functions, overrides and interrupts | read, write |
+| 23 | `BOOT_CAP_PADS_BANK0` | `0x40038000` | 16 KiB | PADS_BANK0, the pins' pads | read, write |
+| 24 to 26 | `BOOT_CAP_PIO0` to `BOOT_CAP_PIO2` | `0x50200000`, `0x50300000`, `0x50400000` | 16 KiB each | PIO0, PIO1 and PIO2 | read, write |
+| 27 | `BOOT_CAP_COUNTER` | `0x400B0020` | 32 bytes | TIMER0's, `TIMERAWL` at 8 into them, 1 MHz, the clock's counter on either kind of core; the word below it is the high half | read |
 
 Each but the counter's is a device's registers and their atomic aliases, and none is a bus master.
 The ADC is not listed: its clock is not running, and it never leaves reset without one.
+Nor is the DMA, which is the kernel's: `BOOT_CAP_DMA` names its sixteen channels, 0 to 15, section 5.14,
+each reading memory, its source, named 0, which may be any of the SRAM a frame holds,
+into a transmit FIFO of a PIO block's state machine, its sink, named by the FIFO's DREQ, through a frame over the PIO block whole:
+0 to 3 PIO0's, 8 to 11 PIO1's, 16 to 19 PIO2's, as the datasheet numbers them.
+A transfer is whole words, from a word of the frame, and as long as the frame;
+the FIFO's DREQ paces it, so it reads no further ahead than the state machine takes.
 
 The kernel takes the USB controller out of reset at boot and opens it to user mode in ACCESSCTRL,
 and starts its 48 MHz clock.
@@ -389,16 +420,16 @@ Interrupt lines:
 | 1 to 47 | the peripherals' lines, numbered by their IDs; nothing raises the console's line, 20, SWI0 |
 
 The root task is granted a frame over GPIO, one over the radio, one over each of TIMER2, TIMER3 and TIMER4,
-and one over the clock's counter, from `BOOT_CAP_DEVICES` up, so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots:
+and one over the clock's counter, from `BOOT_CAP_DEVICES` up, so `BOOT_CAP_COUNT` is 28 here and the root task's table has 74 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
-| 21 | `BOOT_CAP_GPIO` | `0x50000000` | 4 KiB | GPIO, both ports, P0's registers and P1's at `0x50000300` | read, write |
-| 22 | `BOOT_CAP_RADIO` | `0x40001000` | 4 KiB | RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4; its line is 1 | read, write |
-| 23 | `BOOT_CAP_TIMER2` | `0x4000A000` | 4 KiB | TIMER2, which times what is shorter than a kernel's step, such as 802.15.4's backoffs; its line is 10 | read, write |
-| 24 | `BOOT_CAP_TIMER3` | `0x4001A000` | 4 KiB | TIMER3, for routes, such as an acknowledgement's turnaround; its line is 26 | read, write |
-| 25 | `BOOT_CAP_TIMER4` | `0x4001B000` | 4 KiB | TIMER4, for routes, such as a count of the frames received; its line is 27 | read, write |
-| 26 | `BOOT_CAP_COUNTER` | `0x40008540` | 32 bytes | TIMER0's `CC` registers, `CC[1]` at 4 into them, 1 MHz, the clock's counter; no word holds the high half | read |
+| 22 | `BOOT_CAP_GPIO` | `0x50000000` | 4 KiB | GPIO, both ports, P0's registers and P1's at `0x50000300` | read, write |
+| 23 | `BOOT_CAP_RADIO` | `0x40001000` | 4 KiB | RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4; its line is 1 | read, write |
+| 24 | `BOOT_CAP_TIMER2` | `0x4000A000` | 4 KiB | TIMER2, which times what is shorter than a kernel's step, such as 802.15.4's backoffs; its line is 10 | read, write |
+| 25 | `BOOT_CAP_TIMER3` | `0x4001A000` | 4 KiB | TIMER3, for routes, such as an acknowledgement's turnaround; its line is 26 | read, write |
+| 26 | `BOOT_CAP_TIMER4` | `0x4001B000` | 4 KiB | TIMER4, for routes, such as a count of the frames received; its line is 27 | read, write |
+| 27 | `BOOT_CAP_COUNTER` | `0x40008540` | 32 bytes | TIMER0's `CC` registers, `CC[1]` at 4 into them, 1 MHz, the clock's counter; no word holds the high half | read |
 
 The router is the PPI, and `BOOT_CAP_ROUTES` names its channels 1 to 19; channel 0 is the kernel's counter's, below.
 An end is the offset of a register in its device's 4 KiB block, as the product specification gives it:
@@ -428,7 +459,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x40028000` | 32 B | the FPGA's first registers, `COUNTER` at `0x18` into them, 25 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 21 |
+| `0x40028000` | 32 B | the FPGA's first registers, `COUNTER` at `0x18` into them, 25 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 22 |
 | `0x40004000` | 4 KiB | UART0 of the CMSDK, granted to the root task |
 | `0x00000000` to `0x000FF000` | just under 1 MiB | kernel code, data and stack, the vector table first |
 | `0x000FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
@@ -463,7 +494,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x50302000` | 32 B | the FPGA's first registers, `COUNTER` at `0x18` into them, 20 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 21 |
+| `0x50302000` | 32 B | the FPGA's first registers, `COUNTER` at `0x18` into them, 20 MHz, the clock's counter, granted to the root task read only, `BOOT_CAP_COUNTER` in slot 22 |
 | `0x50200000` | 4 KiB | UART0 of the CMSDK, granted to the root task |
 | `0x10000000` to `0x100FF000` | just under 1 MiB | kernel code, data and stack, the vector table first |
 | `0x100FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |

@@ -3,6 +3,7 @@
  * The ABI is documented in include/rvuos/abi.h.
  */
 
+#include "dma.h"
 #include "irq.h"
 #include "kernel.h"
 #include "klog.h"
@@ -321,14 +322,15 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
 
 /*
  * What an object of a type would take of a pool, and the room, see OP_POOL_INFO:
- * the types OP_POOL_ALLOC makes, the Irq OP_IRQ_BIND and the Route OP_ROUTE_BIND make of a pool, and the descriptor.
+ * the types OP_POOL_ALLOC makes, the Irq OP_IRQ_BIND, the Route OP_ROUTE_BIND and the Dma OP_DMA_BIND make of a pool,
+ * and the descriptor.
  */
 static int pool_info(const struct pool *pool, uint32_t *arg)
 {
     uint32_t type = arg[1];
     uint32_t slots = arg[3];
     if (type != CAP_CAPTABLE && type != CAP_PROCESS && type != CAP_THREAD && type != CAP_NOTIFICATION &&
-        type != CAP_IRQ && type != CAP_ROUTE && type != CAP_POOL) {
+        type != CAP_IRQ && type != CAP_ROUTE && type != CAP_DMA && type != CAP_POOL) {
         return KERR_INVALID_ARG;
     }
     uint32_t most = type == CAP_CAPTABLE ? CAPTABLE_MAX_SLOTS : type == CAP_PROCESS ? pmp_entry_count
@@ -869,6 +871,119 @@ static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const 
     }
 }
 
+/* arg[1..] carry the arguments in; see DESIGN.md, "DMA". */
+static int op_dma_line(struct thread *t, uint32_t slot, const struct cap *cap,
+                       uint32_t op, const uint32_t *arg)
+{
+    uint32_t channel = range_first(cap);
+
+    switch (op) {
+    case OP_DMA_CARVE:
+        return carve_range(t, slot, cap, arg);
+    case OP_DMA_BIND: {
+        /* One Dma per channel, so a binding names one channel. */
+        if (range_count(cap) != 1) {
+            return KERR_INVALID_ARG;
+        }
+        struct cap pc;
+        int err = slot_lookup_typed(t, arg[1], CAP_POOL, RIGHT_W, &pc);
+        if (err != KERR_OK) {
+            return err;
+        }
+        struct pool *pool = (struct pool *)cap_object(&pc);
+        if (pool->dying) {
+            return KERR_STATE;
+        }
+        if (dma_binding(channel) != NULL) {
+            return KERR_OVERLAP;
+        }
+        /* The invoked slot is cleared below, so it may receive the Dma capability, under whichever number names it. */
+        if (slot_at(t, arg[2]) != slot_node(t, slot)) {
+            err = slot_vacant(t, arg[2]);
+            if (err != KERR_OK) {
+                return err;
+            }
+        }
+        /* Room is checked before the channel's derivation goes, since what a revoke took stays taken. */
+        if (!pool_fits(pool, obj_type_size(CAP_DMA, 0))) {
+            return KERR_NO_MEMORY;
+        }
+        if (!cap_revoke_below(slot_node(t, slot), slot, true)) {
+            return KERR_PREEMPTED;
+        }
+        struct dma *d = pool_alloc(pool, CAP_DMA, obj_type_size(CAP_DMA, 0));
+        d->channel = (uint16_t)channel;
+        channel_dma[channel - DMA_FIRST] = v2p(d);
+        /* The channel goes, a leaf now, and the Dma hangs below the pool capability as any object does. */
+        cap_delete(slot_node(t, slot), false);
+        struct cap dc = cap_to_object(&d->hdr, RIGHT_ALL);
+        return slot_store(t, arg[2], &dc, slot_node(t, arg[1]));
+    }
+    default:
+        return KERR_WRONG_TYPE;
+    }
+}
+
+/* arg[1..] carry the arguments in. */
+static int op_dma(struct thread *t, const struct cap *cap, uint32_t op, const uint32_t *arg)
+{
+    struct dma *d = (struct dma *)cap_object(cap);
+
+    switch (op) {
+    case OP_DMA_END: {
+        uint32_t end = arg[1];
+        if (end != DMA_SOURCE && end != DMA_SINK) {
+            return KERR_INVALID_ARG;
+        }
+        /* The source is read and the sink written: the frame lets its holder do the one or the other. */
+        struct cap fc;
+        int err = slot_lookup_typed(t, arg[2], CAP_FRAME, end == DMA_SOURCE ? RIGHT_R : RIGHT_W, &fc);
+        if (err != KERR_OK) {
+            return err;
+        }
+        uint32_t word;
+        if (!dmac_end(d->channel, end, block_base(&fc), block_size(&fc), arg[3], &word)) {
+            return KERR_INVALID_ARG;
+        }
+        /*
+         * An end connected before is replaced; nothing is derived from it, so it goes in a step,
+         * and its going halts the channel, so no transfer goes on with an end the Dma no longer holds.
+         */
+        if (d->ends[end].type != CAP_NONE) {
+            cap_delete(&d->ends[end], false);
+        }
+        /* It hangs below the capability it was connected through, so a revoke above that halts the channel. */
+        d->ends[end] = (struct cap){ .type = CAP_FRAME, .rights = fc.rights, .a = fc.a };
+        d->ends[end].b = held_word(v2p(d), 0);
+        cap_attach(slot_at(t, arg[2]), &d->ends[end]);
+        d->names[end] = arg[3];
+        return KERR_OK;
+    }
+    case OP_DMA_START: {
+        uint32_t offset = arg[1], length = arg[2];
+        if (offset % DMA_GRAIN != 0 || length % DMA_GRAIN != 0 || length == 0 || length > DMA_MOST) {
+            return KERR_INVALID_ARG;
+        }
+        if (d->ends[DMA_SOURCE].type == CAP_NONE || d->ends[DMA_SINK].type == CAP_NONE || dma_busy(d)) {
+            return KERR_STATE;
+        }
+        /* The range lies in the memory end's frame, which holds it as long as the transfer may reach it. */
+        const struct cap *memory = &d->ends[dmac_memory(d->channel)];
+        if (offset > block_size(memory) || length > block_size(memory) - offset) {
+            return KERR_INVALID_ARG;
+        }
+        uint32_t device = dmac_memory(d->channel) == DMA_SOURCE ? DMA_SINK : DMA_SOURCE;
+        dmac_start(d->channel, dma_word(d, device), block_base(memory) + offset, length);
+        return KERR_OK;
+    }
+    case OP_DMA_STOP:
+        dmac_halt(d->channel);
+        return KERR_OK;
+    default:
+        return KERR_WRONG_TYPE;
+    }
+}
+
 /* arg[1..] carry the arguments in. */
 static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
                    uint32_t op, const uint32_t *arg)
@@ -1107,6 +1222,19 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         arg[4] = r->armed;
         break;
     }
+    case CAP_DMA_LINE:
+        arg[2] = range_first(cap);
+        arg[3] = range_count(cap);
+        break;
+    case CAP_DMA: {
+        /* Which ends are connected and whether a transfer may still reach the memory, never what the ends are. */
+        const struct dma *d = (const struct dma *)cap_object(cap);
+        arg[2] = d->channel;
+        arg[3] = (d->ends[DMA_SOURCE].type != CAP_NONE ? 1u << DMA_SOURCE : 0) |
+                 (d->ends[DMA_SINK].type != CAP_NONE ? 1u << DMA_SINK : 0);
+        arg[4] = dma_busy(d);
+        break;
+    }
     case CAP_CLOCK:
         /* The rate and the default span, not the time, so no RIGHT_R. */
         arg[2] = timer_counter_hz();
@@ -1193,6 +1321,11 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_ROUTE_BIND] = { CAP_ROUTE_LINE, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
     [OP_ROUTE_END] = { CAP_ROUTE, RIGHT_W, SHAPE_A123 },
     [OP_ROUTE_SET] = { CAP_ROUTE, RIGHT_W, SHAPE_A1 },
+    [OP_DMA_CARVE] = { CAP_DMA_LINE, 0, SHAPE_A123 },
+    [OP_DMA_BIND] = { CAP_DMA_LINE, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
+    [OP_DMA_END] = { CAP_DMA, RIGHT_W, SHAPE_A123 },
+    [OP_DMA_START] = { CAP_DMA, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
+    [OP_DMA_STOP] = { CAP_DMA, RIGHT_W, 0 },
 };
 
 /*
@@ -1311,6 +1444,12 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         break;
     case CAP_ROUTE:
         err = op_route(t, &cap, op, arg);
+        break;
+    case CAP_DMA_LINE:
+        err = op_dma_line(t, slot, &cap, op, arg);
+        break;
+    case CAP_DMA:
+        err = op_dma(t, &cap, op, arg);
         break;
     default:
         err = KERR_WRONG_TYPE;

@@ -22,6 +22,12 @@
 #define BOOT_RAM_BLOCKS 1
 #define BOOT_CAP_MORE_RAM (BOOT_CAP_RAM_BLOCKS + 0) /* 128 KiB from 0x40820000, right below the free RAM */
 
+/*
+ * BOOT_CAP_DMA's channels: the GDMA's transmit channels, each reading memory, its source, into a device, its sink,
+ * which a Dma names by the request the GDMA takes for it within the device's frame; see the kernel's dma.c.
+ */
+#define DMA_REQUEST_SPI2 1u
+
 #define EFUSE_BASE  0x600B4800u
 #define IO_MUX_BASE 0x60090000u
 #define GPIO_BASE   0x60091000u

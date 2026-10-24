@@ -111,7 +111,8 @@
  * user/board/rp2350/devices.h names their slots.
  * board.c takes them out of reset and opens them to user mode in ACCESSCTRL,
  * and on Hazard3 opens every pin to Non-secure access, which is how user mode reaches the bus there.
- * The DMA, which reaches all of memory, and the devices the kernel keeps lie in none.
+ * The DMA, which reaches all of memory, and the devices the kernel keeps lie in none;
+ * the kernel lends the DMA's channels, see below.
  * A device whose clock the kernel does not start, as the ADC's, never leaves reset, so it is not listed.
  */
 #define BOOT_DEVICES 6
@@ -122,6 +123,15 @@
     { U32(0x50300000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
     { U32(0x50400000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
     { COUNTER_ADDR & ~U32(0x1f), U32(0x20), RIGHT_R },
+
+/*
+ * The DMA controller: its sixteen channels, each reading memory into one of the PIO blocks' transmit FIFOs,
+ * named by its DREQ; a transfer is whole words, and as long as the channel's 28-bit count of them. See dma.c.
+ */
+#define DMA_FIRST    0u
+#define DMA_CHANNELS 16u
+#define DMA_GRAIN    4u
+#define DMA_MOST     U32(0x3ffffffc)
 
 /* No further blocks of RAM beside the free RAM, which the ESP32-C6 has; see boot.c. */
 #define BOOT_RAM_BLOCKS 0

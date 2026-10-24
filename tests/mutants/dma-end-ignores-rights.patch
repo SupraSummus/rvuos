@@ -1,0 +1,20 @@
+A Dma's end is connected through a frame without the right it needs.
+A holder could have the controller read memory it may not read, or write memory it may not write;
+the source is read and the sink written through a frame that allows it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: dma's end names no frame it may connect
+Witness: fuzz dma-starts-within-its-frame
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -937,7 +937,7 @@ static int op_dma(struct thread *t, const struct cap *cap, uint32_t op, const ui
+         }
+         /* The source is read and the sink written: the frame lets its holder do the one or the other. */
+         struct cap fc;
+-        int err = slot_lookup_typed(t, arg[2], CAP_FRAME, end == DMA_SOURCE ? RIGHT_R : RIGHT_W, &fc);
++        int err = slot_lookup_typed(t, arg[2], CAP_FRAME, 0, &fc);
+         if (err != KERR_OK) {
+             return err;
+         }

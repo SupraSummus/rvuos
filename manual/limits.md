@@ -14,7 +14,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | minimum PMP entries to boot | 4 | `kernel/main.c` |
 | slots per `CapTable` | 1 to 1024 | `CAPTABLE_MAX_SLOTS` |
 | a slot number | `SLOT_IN(table slot, index)`: the table slot from bit 10 up, the index below | `SLOT_TABLE_SHIFT` |
-| root task's table | 46 slots past the boot capabilities, 67 in all on QEMU | `ROOT_TABLE_SLOTS` |
+| root task's table | 46 slots past the boot capabilities, 69 in all on QEMU | `ROOT_TABLE_SLOTS` |
 | boot pool | 4 KiB | `BOOT_POOL_SIZE` in `kernel/layout.h` |
 | smallest pool | 64 bytes | `POOL_MIN_SIZE` |
 | object alignment | 16 bytes | `OBJ_ALIGN` |
@@ -22,6 +22,8 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |
 | a router's channels | 19 on the nRF52840, 4 that wire nothing on QEMU's boards, none elsewhere | `OP_CAP_INFO` on `BOOT_CAP_ROUTES` |
+| a DMA controller's channels | 3 on the ESP32-C6 and the ESP32-C5, 16 on RP2350, 4 that move nothing on QEMU's boards, none on the nRF52840 | `OP_CAP_INFO` on `BOOT_CAP_DMA` |
+| a DMA transfer | whole words, and at most 32736 bytes on the ESP32-C6 and the ESP32-C5, the frame's length on RP2350, or 4096 on QEMU's boards | `DMA_GRAIN` and `DMA_MOST` in the kernel's `board.h`; `OP_DMA_START` |
 | units of time | 64 of each core | `TIME_UNITS` |
 | cores | 1, or 2 on QEMU `virt`, mps2-an521 and RP2350 with `CORES=2` | Makefile; `OP_CAP_INFO` on `BOOT_CAP_TIME`, its count over `TIME_UNITS` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |

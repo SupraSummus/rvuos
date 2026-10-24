@@ -1,10 +1,12 @@
 /*
  * The board's bus.h: SPI2 and the pins of Waveshare's ESP32-C5-LCD-1.47, as its own support package names them.
  *
- * SPI2 sends what the CPU writes into its 64-byte buffer, a transfer at a time, with no DMA:
- * the GDMA, which would reach all of RAM, is not the program's, see the kernel's board.h.
+ * SPI2 sends what the CPU writes into its 64-byte buffer, a transfer at a time,
+ * or, from memory a Dma reaches, what the GDMA reads there, up to the kernel's longest transfer at once;
+ * the kernel starts the GDMA on a range of the Dma's frame it checked, see spi2_dma and DESIGN.md, "DMA".
  * A transfer of data goes on while the program does, and whatever next touches SPI2, its buffer or the pins
- * that frame a command waits for it first, so that a program can work out its next bytes while the last go out.
+ * that frame a command waits for it first, so that a program can work out its next bytes while the last go out;
+ * a transfer by DMA reads its bytes as it goes, so they stay as they are until then.
  * The select is a plain pin, held low across a command and all its data,
  * so the data may span as many transfers as it takes.
  * The clock and data reach SPI2 through the GPIO matrix, since the IO MUX's own SPI pins are the other way round.
@@ -21,6 +23,7 @@
 #include "bus.h"
 #include "spi2.h"
 #include "devices.h"
+#include "pins.h"
 #include "rvuos.h"
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
@@ -33,32 +36,14 @@
 #define PIN_DC   24 /* low for a command, high for its data */
 #define PIN_RST  26 /* the controller's reset, while low */
 
-/* The GPIO matrix: levels, output enables, and each pin's output signal. */
-#define GPIO_OUT_W1TS    (GPIO_BASE + 0x08u)
-#define GPIO_OUT_W1TC    (GPIO_BASE + 0x0cu)
-#define GPIO_ENABLE_W1TS (GPIO_BASE + 0x38u)
-#define GPIO_ENABLE_W1TC (GPIO_BASE + 0x3cu)
-#define GPIO_IN_SEL(sig) (GPIO_BASE + 0x2d4u + 4u * (sig))
-#define GPIO_IN_MATRIX   (1u << 8)     /* the signal comes from the pin named, through the matrix */
-#define GPIO_OUT_SEL(n)  (GPIO_BASE + 0xad4u + 4u * (n))
-#define GPIO_OE_FROM_ENABLE (1u << 10) /* the pin is driven while its GPIO_ENABLE bit is set */
-#define SIG_GPIO_OUT     256u          /* the pin's level is its GPIO_OUT bit */
-#define SIG_FSPICLK      56u
-#define SIG_FSPIQ        57u           /* SPI2's MISO, an input */
-#define SIG_FSPID        58u
-#define SIG_SDM0         76u           /* the sigma-delta modulator's channel 0 */
-
-/* GPIO_EXT's sigma-delta modulator: its clock, and channel 0's density, signed, and prescale. */
+/* GPIO_EXT's sigma-delta modulator: its output signal, its clock, and channel 0's density, signed, and prescale. */
+#define SIG_SDM0         76u
 #define SDM_MISC         (GPIO_BASE + 0xe04u)
 #define SDM_CLK_EN       (1u << 0)
 #define SDM0             (GPIO_BASE + 0xe08u)
 #define SDM_PRESCALE     255u          /* a step each 256 of the clock's ticks, 187.5 kHz */
 
-/* The IO MUX: each pin's function, 1 the GPIO matrix's, and its drive strength, of 0 to 3. */
-#define IO_MUX_PIN(n)    (IO_MUX_BASE + 4u * (n))
-#define IO_MUX_MATRIX(drive) ((1u << 12) | ((drive) << 10))
-#define IO_MUX_INPUT     (1u << 9)     /* the pin's input is enabled */
-#define DRIVE_DEFAULT    2u
+#define DRIVE_DEFAULT    2u /* of the IO MUX's 0 to 3 */
 
 /* SPI2, as master, sending from its buffer W0 to W15. */
 #define SPI_CMD          (SPI2_BASE + 0x00u)
@@ -75,12 +60,18 @@
 #define SPI_USER2        (SPI2_BASE + 0x18u)
 #define SPI_MS_DLEN      (SPI2_BASE + 0x1cu)
 #define SPI_DMA_CONF     (SPI2_BASE + 0x30u)
+#define SPI_DMA_TX_ENA   (1u << 28) /* the data comes from the GDMA rather than the buffer */
 #define SPI_BUF_AFIFO_RST (1u << 30)
+#define SPI_DMA_AFIFO_RST (1u << 31)
+
 #define SPI_W(i)         (SPI2_BASE + 0x98u + 4u * (i))
 #define SPI_BUF_BYTES    64u
 
-/* Polls before a wait for SPI2 gives up on it, far more than a transfer of the buffer takes at 40 MHz. */
-#define SPI_POLLS 100000u
+/* Polls before a wait for SPI2 gives up on it, far more than the longest transfer by DMA takes at 40 MHz. */
+#define SPI_POLLS 1000000u
+
+/* The longest transfer by DMA, the kernel's on the ESP32-C5, and no longer than SPI2 counts in bits. */
+#define DMA_BYTES 32736u
 
 static void pin(unsigned n, int high)
 {
@@ -181,8 +172,36 @@ void lcd_bus_command(uint8_t command)
     pin(PIN_DC, 1);
 }
 
+/* Start sending n bytes at offset of the Dma's frame, at most DMA_BYTES, with no transfer under way. */
+static void send_dma(uint32_t offset, uint32_t n)
+{
+    REG(SPI_DMA_CONF) = SPI_DMA_TX_ENA | SPI_DMA_AFIFO_RST;
+    REG(SPI_DMA_CONF) = SPI_DMA_TX_ENA;
+    uint32_t err = rv_invoke(OP_DMA_START, spi2_dma_state.slot, offset, n, 0);
+    if (err != KERR_OK) {
+        rv_puts(BOOT_CAP_PRINT, "lcd: start the DMA: FAILED\n");
+        rv_halt(BOOT_CAP_HALT, err);
+    }
+    REG(SPI_MS_DLEN) = n * 8 - 1;
+    REG(SPI_CMD) = SPI_CMD_UPDATE;
+    settle(SPI_CMD_UPDATE, "SPI2 takes its registers");
+    REG(SPI_CMD) = SPI_CMD_USR;
+}
+
 void lcd_bus_data(const uint8_t *bytes, uint32_t n)
 {
+    const struct spi2_dma *dma = &spi2_dma_state;
+    uintptr_t at = (uintptr_t)bytes - dma->base;
+    if (dma->slot != 0 && at < dma->size && n <= dma->size - at && (at | n) % 4 == 0) {
+        while (n > 0) {
+            uint32_t chunk = n < DMA_BYTES ? n : DMA_BYTES;
+            idle();
+            send_dma((uint32_t)at, chunk);
+            at += chunk;
+            n -= chunk;
+        }
+        return;
+    }
     while (n > 0) {
         uint32_t chunk = n < SPI_BUF_BYTES ? n : SPI_BUF_BYTES;
         idle();
@@ -239,6 +258,12 @@ void lcd_bus_backlight(uint32_t level)
     REG(SDM_MISC) = SDM_CLK_EN;
     REG(SDM0) = SDM_PRESCALE << 8 | ((level - 128u) & 0xffu);
     REG(GPIO_OUT_SEL(PIN_BL)) = SIG_SDM0 | GPIO_OE_FROM_ENABLE;
+}
+
+void spi2_dma(uint32_t slot, const void *base, uint32_t size)
+{
+    idle();
+    spi2_dma_state = (struct spi2_dma){ slot, (uintptr_t)base, size };
 }
 
 void spi2_configure(uint32_t mhz, uint32_t drive)

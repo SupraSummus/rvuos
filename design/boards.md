@@ -130,8 +130,9 @@ a window onto flash, read and execute, for a program larger than its SRAM,
 the ROM, read and execute, whose functions those libraries call,
 the random number generator's data register, read only, the eight bytes of LPPERI that hold it,
 since the rest of LPPERI reaches the LP domain's clocks and resets,
-and the IO MUX and the GPIO matrix, the pins, which a program sets as its board wires them,
-as the Wi-Fi system's root task sets the XIAO's RF switch;
+the IO MUX and the GPIO matrix, the pins, which a program sets as its board wires them,
+as the Wi-Fi system's root task sets the XIAO's RF switch,
+and SPI2, which reaches memory only by a channel of the kernel's GDMA, as on the ESP32-C5;
 the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives,
 and its radio, which `user/thread/` drives in 802.15.4's mode and `user/observer/` in BLE's,
 with TIMER2 for what is shorter than a kernel's step, as the kernel's timer keeps TIMER0 and TIMER1,
@@ -139,7 +140,7 @@ and TIMER3 and TIMER4, which routes wire to the radio;
 and every board whose core lets user mode load the clock's counter lists it, read only,
 `BOOT_CAP_COUNTER`, for a program that times with no call what the kernel does to it, as the demo does;
 QEMU and the MPS2 boards list that alone, and the ESP32-C5, whose core refuses user mode the CLINT, lists none.
-So on QEMU `BOOT_CAP_COUNT` is 22, the number the seeds and the corpus are written for.
+So on QEMU `BOOT_CAP_COUNT` is 23, the number the seeds and the corpus are written for.
 A device that is a bus master reaches whatever its driver points it at, so its frame is the machine's:
 the ESP32-C6's modem and the nRF52840's radio are those a board lists, each for a driver the root task trusts with all RAM,
 and the ESP32-C6's HP_SYSTEM, which gives the modem's dump engine a bank of SRAM; open decision 13.
@@ -161,6 +162,25 @@ The nRF52840's is the PPI, `kernel/board/nrf52840/route.c`: channels 1 to 19, ch
 an end the offset of a task, 0x000 to 0x07c, or an event, 0x100 to 0x17c, of a device of the APB.
 QEMU's boards have `ROUTER_FAKE`, four channels of `kernel/route.c` that wire nothing,
 which the host shares; the ESP32-C6 and RP2350 lend none yet, decision 37.
+
+**DMA controllers.**
+A board with a DMA controller apart from its devices lends its channels from `DMA_FIRST`, `DMA_CHANNELS` of them, see "DMA",
+says the grain of a transfer, `DMA_GRAIN`, and its longest, `DMA_MOST`,
+and gives `dmac_memory` and `dmac_end`, which say which end of a channel is memory and what an end's name is in a frame,
+and the controller's start, halt and read back.
+The ESP32-C6's and the ESP32-C5's is the GDMA, `kernel/board/esp32/dma.c`: its three transmit channels, each reading memory into a device,
+whole words at a time and at most eight of the GDMA's descriptors, 32736 bytes,
+the memory any of the SRAM a frame holds, and the device SPI2, request 0 on the C6 and 1 on the C5, through a frame that holds its registers whole.
+The two differ in little, `GDMA_V2` in `board.h`: the C5's takes the descriptors' address in a register of its own,
+reports a bus's refusal, and has a window onto memory, which the kernel keeps on the SRAM.
+RP2350's is its DMA, `kernel/board/rp2350/dma.c`, on either kind of core: its sixteen channels, each reading memory into
+a transmit FIFO of a PIO block's state machine, named by its DREQ, through a frame over the PIO block whole,
+whole words at a time and as many as the channel's 28-bit count;
+a halt is the datasheet's abort, with RP2350-E5's workaround, `EN` cleared first.
+QEMU's boards have `DMA_FAKE`, four channels of `kernel/dma.c` that move nothing, which the host shares;
+the nRF52840 lends none, since its EasyDMA lies in each device, decision 42.
+`make dma-test`, `user/dma/`, holds each board's controller to what the kernel says of it on silicon,
+through a loop that hands every word back: a PIO state machine on RP2350, SPI2 with its data pin turned back into itself on the ESP32s.
 
 **QEMU `virt`** is the development target and the one `make check` runs.
 QEMU loads the image and enters it in machine mode.
@@ -187,7 +207,8 @@ The console is the chip's USB Serial/JTAG controller,
 a CDC-ACM port on its own USB connector, which also resets the chip into the ROM's download mode,
 in hardware, whatever the flash holds, so a kernel that hangs at boot costs nothing but a write of the flash.
 The ROM leaves the SAR ADC's registers in reset, where every write is dropped, and its clocks off;
-the kernel takes it out and starts them, since `board.h` lists it.
+the kernel takes it out and starts them, since `board.h` lists it,
+and resets SPI2 and starts its clocks, its master clock at 80 MHz, PLL_F80M.
 The kernel maps the image's first MiB of flash at `0x42800000` and the window onto flash, 1 MiB from `0x210000`, at `0x42000000`,
 the MMU's only valid entries;
 the Wi-Fi system's driver, too large for the SRAM, runs from the window.
@@ -249,6 +270,8 @@ TEE controllers give each peripheral a read and a write bit per security mode, r
 so user mode reads every peripheral as zero; the kernel turns the units off and grants every TEE bit to every mode.
 Of the peripherals it lists SPI2, which drives the board's LCD, and not the GDMA, so SPI2 is no bus master to the program that holds it;
 SPI2's clocks are in PCR, which stays the kernel's, so the kernel sets them, 80 MHz for its master clock, and resets the controller at boot.
+The GDMA is the kernel's, which lends its transmit channels, see "DMA controllers" above,
+and keeps the GDMA's own window, the memory any channel may reach, on the SRAM.
 It lists the random number generator too, read only, as the first 128 bytes of LPPERI, since the PMP's grain is that coarse,
 where the ESP32-C6 lists the eight bytes of its data register;
 a program reads but cannot write the block's other words, the LP domain's clocks and resets among them,

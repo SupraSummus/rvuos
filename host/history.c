@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dma.h"
 #include "harness.h"
 #include "layout.h"
 #include "ops.h"
@@ -126,7 +127,8 @@ static uint32_t describe_want[4];
 static byte_array state, state_after;
 
 /*
- * An allocation from a pool, OP_POOL_ALLOC's, OP_IRQ_BIND's or OP_ROUTE_BIND's, of a type whose size its arguments say:
+ * An allocation from a pool, OP_POOL_ALLOC's, OP_IRQ_BIND's, OP_ROUTE_BIND's or OP_DMA_BIND's,
+ * of a type whose size its arguments say:
  * the pool, its bytes in use and whether it was dying as the attempt began, and the bytes the type takes.
  */
 static const struct pool *room_pool;
@@ -221,7 +223,7 @@ __attribute__((noreturn)) static void violated(const char *what)
  * an installed region what the frame it came from did, a thread's units those units,
  * a thread's process what a capability to it does,
  * a thread's watch and an Irq's notification what one to the notification does, with the bits they may signal,
- * and a Route's end what the frame it was connected through did.
+ * and a Route's or a Dma's end what the frame it was connected through did.
  * What the second word holds besides, the first child or the holder, is the tree's and grants nothing.
  */
 static struct grant grant_of(const struct cap *c)
@@ -233,6 +235,7 @@ static struct grant grant_of(const struct cap *c)
     case CAP_IRQ_LINE:
     case CAP_TIME:
     case CAP_ROUTE_LINE:
+    case CAP_DMA_LINE:
         return (struct grant){ c->type, c->rights, range_first(c), range_count(c) };
     case CAP_NOTIFICATION:
         return (struct grant){ c->type, c->rights, cap_addr(c), notify_bits(c) };
@@ -253,7 +256,7 @@ static bool same_grant(struct grant x, struct grant y)
 static bool covered(struct grant g)
 {
     bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE || g.type == CAP_TIME ||
-                 g.type == CAP_ROUTE_LINE;
+                 g.type == CAP_ROUTE_LINE || g.type == CAP_DMA_LINE;
     for (size_t i = 0; i < held.n; i++) {
         const struct grant *h = &held.v[i];
         bool type = h->type == g.type || (g.type == CAP_FRAME && h->type == CAP_UNTYPED);
@@ -348,7 +351,7 @@ static void children_of(const struct cap *c, addr_array *out)
  */
 #define RIGHTS_IN_HANDLER 0
 #define RIGHTS_UNKNOWN 0xff
-_Static_assert(OP_COUNT == 48 && OP_THREAD_OVERRUNS == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 53 && OP_DMA_STOP == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -375,6 +378,10 @@ static uint8_t rights_needed(uint32_t op)
     case OP_ROUTE_BIND:
     case OP_ROUTE_END:
     case OP_ROUTE_SET:
+    case OP_DMA_BIND:
+    case OP_DMA_END:
+    case OP_DMA_START:
+    case OP_DMA_STOP:
     case OP_TIME_BIND:
     case OP_PRINT:
     case OP_HALT:
@@ -395,6 +402,7 @@ static uint8_t rights_needed(uint32_t op)
     case OP_IRQ_CARVE:
     case OP_TIME_CARVE:
     case OP_ROUTE_CARVE:
+    case OP_DMA_CARVE:
     case OP_NOTIFY_CARVE:
         return RIGHTS_IN_HANDLER;
     /* A description grants nothing, so it needs no right. */
@@ -449,6 +457,9 @@ static uint32_t type_bytes(uint32_t type, uint32_t slots)
         break;
     case CAP_ROUTE:
         size = sizeof(struct route);
+        break;
+    case CAP_DMA:
+        size = sizeof(struct dma);
         break;
     case CAP_POOL:
         size = sizeof(struct pool);
@@ -515,7 +526,8 @@ static void describe_expect(void)
         w[3] = pmp_grain < 8 ? 8 : pmp_grain;
         break;
     case CAP_UNTYPED:
-        /* A frame, a region installed from one or a Route's end on one, a half or a derived Untyped, or a pool's own node. */
+        /* A frame, a region installed from one or a Route's or a Dma's end on one, a half or a derived Untyped,
+         * or a pool's own node. */
         w[1] = block_base(c);
         w[2] = block_size(c);
         w[3] = cap_child(c) != 0 ? ((const struct cap *)p2v(cap_child(c)))->type : CAP_NONE;
@@ -575,6 +587,18 @@ static void describe_expect(void)
         w[3] = r->armed != 0;
         break;
     }
+    case CAP_DMA_LINE:
+        w[1] = range_first(c);
+        w[2] = range_count(c);
+        break;
+    case CAP_DMA: {
+        const struct dma *d = (const struct dma *)cap_object(c);
+        w[1] = d->channel;
+        w[2] = (d->ends[DMA_SOURCE].type == CAP_FRAME ? 1u << DMA_SOURCE : 0) |
+               (d->ends[DMA_SINK].type == CAP_FRAME ? 1u << DMA_SINK : 0);
+        w[3] = dma_busy(d);
+        break;
+    }
     case CAP_CLOCK:
         /* The rate, and the longest power of two of counts within a millisecond, the default span. */
         w[1] = COUNTER_HZ;
@@ -618,7 +642,8 @@ static void record_room(void)
     if (call_op == OP_POOL_ALLOC && invoked_cap.type == CAP_POOL) {
         /* A process's region slots and a thread's places are their a4, a table's slots its a3. */
         bool a4 = call_args[0] == CAP_PROCESS || call_args[0] == CAP_THREAD;
-        room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_ROUTE || call_args[0] == CAP_POOL ? 0
+        room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_ROUTE || call_args[0] == CAP_DMA ||
+                            call_args[0] == CAP_POOL ? 0
                     : type_bytes(call_args[0], a4 ? call_args[3] : call_args[2]);
     } else if (call_op == OP_IRQ_BIND && invoked_cap.type == CAP_IRQ_LINE &&
                slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
@@ -626,6 +651,9 @@ static void record_room(void)
     } else if (call_op == OP_ROUTE_BIND && invoked_cap.type == CAP_ROUTE_LINE &&
                slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
         room_need = type_bytes(CAP_ROUTE, 0);
+    } else if (call_op == OP_DMA_BIND && invoked_cap.type == CAP_DMA_LINE &&
+               slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
+        room_need = type_bytes(CAP_DMA, 0);
     } else {
         return;
     }
@@ -1113,6 +1141,7 @@ static void record_carve(void)
     case OP_IRQ_CARVE:
     case OP_TIME_CARVE:
     case OP_ROUTE_CARVE:
+    case OP_DMA_CARVE:
         carve_off = call_args[0];
         carve_len = call_args[1];
         carve_dst = call_args[2];
@@ -1144,7 +1173,8 @@ static void check_carve(void)
     bool named = slot_lookup(caller, carve_dst, &c) == KERR_OK && c.type == s->type && c.rights == s->rights;
     if (named && s->type == CAP_FRAME) {
         named = block_base(&c) == block_base(s) + carve_off && block_size(&c) == carve_len;
-    } else if (named && (s->type == CAP_IRQ_LINE || s->type == CAP_TIME || s->type == CAP_ROUTE_LINE)) {
+    } else if (named && (s->type == CAP_IRQ_LINE || s->type == CAP_TIME || s->type == CAP_ROUTE_LINE ||
+                         s->type == CAP_DMA_LINE)) {
         named = range_first(&c) == range_first(s) + carve_off && range_count(&c) == carve_len;
     } else if (named) {
         named = cap_addr(&c) == cap_addr(s) && notify_bits(&c) == (notify_bits(s) & carve_off);
@@ -1261,6 +1291,8 @@ static void check_built(const struct obj_header *o)
                 covered((struct grant){ CAP_IRQ_LINE, RIGHT_W, irq->line, 1 });
     } else if (o->type == CAP_ROUTE) {
         bound = covered((struct grant){ CAP_ROUTE_LINE, RIGHT_W, ((const struct route *)o)->channel, 1 });
+    } else if (o->type == CAP_DMA) {
+        bound = covered((struct grant){ CAP_DMA_LINE, RIGHT_W, ((const struct dma *)o)->channel, 1 });
     }
     if (!bound) {
         violated("a call bound an object to something its caller could not use");
@@ -1295,6 +1327,9 @@ static void check_node(const struct obj_header *o, const struct cap *c)
     }
     if (o->type == CAP_ROUTE && c->type != CAP_NONE && !covered((struct grant){ CAP_ROUTE, RIGHT_W, v2p(o), 0 })) {
         violated("a call connected an end of a route its caller could not control");
+    }
+    if (o->type == CAP_DMA && c->type != CAP_NONE && !covered((struct grant){ CAP_DMA, RIGHT_W, v2p(o), 0 })) {
+        violated("a call connected an end of a dma its caller could not control");
     }
 }
 

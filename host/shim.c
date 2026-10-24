@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "csr.h"
+#include "dma.h"
 #include "harness.h"
 #include "irq.h"
 #include "klog.h"
@@ -436,6 +437,7 @@ struct thread *host_boot(void)
     process_fence();
     irq_init();
     route_init();
+    dma_init();
     klog_init();
 
     /* The layout is the target's, the log and the boot pool included, so the PMP images of the two builds agree. */

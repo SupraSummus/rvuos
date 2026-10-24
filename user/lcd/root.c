@@ -13,7 +13,9 @@
  * scene= names app.c's scene, pattern unless given, mhz= the bus's clock, 40 or 80, and drive= its pins' drive, 0 to 3,
  * see spi2.h, madctl= the orient scene's MADCTL in decimal, such as madctl=96, each of orient.h's in turn unless given,
  * backlight= its level, 0 to 255, see bus.h, 255 unless given,
- * and pictures= how many the noise and veins scenes draw, see noise.h and veins.h, 0 for no end, which never halts.
+ * pictures= how many the noise and veins scenes draw, see noise.h and veins.h, 0 for no end, which never halts,
+ * sync=0 has the veins scene draw as fast as it can rather than in step with the refresh, torn, to measure it,
+ * and dma=0 has it send its pictures through SPI2's buffer, as the other scenes do, rather than by DMA.
  * The anim scene's report, see anim.h, follows the drawing on the console.
  * The noise scene writes the random number generator's RNG_CFG before it draws and after, its top byte the ring oscillator's samples,
  * and the veins scene how many pictures a second it drew.
@@ -22,6 +24,8 @@
  * The veins scene's memory is the boot's free RAM and the further block below it, 256 KiB side by side, as two frames;
  * the root task holds no region slot for them, so once the configuration is read and the pins are set up
  * they take the slots of the input and the IO MUX, which nothing reads after.
+ * Its pictures go out by DMA from the lower of the two: a channel of BOOT_CAP_DMA,
+ * its source that frame and its sink SPI2; see spi2.h.
  *
  * The probe scene leaves the screen black and takes lines from the console, for user/lcd/tools/probe.py:
  * "x y" lights the panel's pixel at x, y and puts out the one lit before, "off" puts it out,
@@ -57,6 +61,8 @@ enum {
     SLOT_CONSOLE,               /* the Irq on the console's line, for the probe */
     SLOT_LOW_RAM,               /* the further block of RAM as a frame, for the veins scene */
     SLOT_HIGH_RAM,              /* the free RAM as a frame, right above it */
+    SLOT_DMA_LINE,              /* the DMA channel the veins scene sends by, carved */
+    SLOT_DMA,                   /* the Dma on it */
 };
 
 /* Region slots of the root task's process past its code and data. */
@@ -395,6 +401,20 @@ static void *veins_memory(void)
     return (void *)(uintptr_t)low;
 }
 
+struct spi2_dma spi2_dma_state;
+
+/* SPI2 sends from the veins scene's lower frame, which holds its pictures, by DMA. */
+static void veins_dma(void *memory)
+{
+    uint32_t base, size;
+    expect("the further block", rv_frame_info(SLOT_LOW_RAM, &base, &size));
+    expect("a DMA channel", rv_invoke(OP_DMA_CARVE, BOOT_CAP_DMA, 0, 1, SLOT_DMA_LINE));
+    expect("bind the channel", rv_invoke(OP_DMA_BIND, SLOT_DMA_LINE, BOOT_CAP_POOL, SLOT_DMA, 0));
+    expect("the channel's source", rv_invoke(OP_DMA_END, SLOT_DMA, DMA_SOURCE, SLOT_LOW_RAM, 0));
+    expect("the channel's sink", rv_invoke(OP_DMA_END, SLOT_DMA, DMA_SINK, BOOT_CAP_SPI2, DMA_REQUEST_SPI2));
+    spi2_dma(SLOT_DMA, memory, size);
+}
+
 /* A rate, whole and in hundredths, of count in cycles at hz a second, in 32 bits, which the program divides in. */
 static void put_rate(uint32_t count, uint64_t cycles, uint32_t hz)
 {
@@ -471,6 +491,8 @@ int main(void)
     options.report = &report;
     options.random = random_word;
     options.pictures = config_number(conf, size, "pictures", NOISE_PICTURES);
+    options.sync = config_number(conf, size, "sync", 1) != 0;
+    uint32_t dma = config_number(conf, size, "dma", 1);
     if (options.backlight > LCD_BACKLIGHT_FULL) {
         options.backlight = LCD_BACKLIGHT_FULL;
     }
@@ -504,6 +526,9 @@ int main(void)
     spi2_configure(mhz, drive);
     if (scene == APP_VEINS) {
         options.memory = veins_memory();
+        if (dma != 0) {
+            veins_dma(options.memory);
+        }
     }
     uint64_t t0 = cycles();
     struct st7789 lcd;
@@ -526,7 +551,9 @@ int main(void)
         put_dec(options.pictures);
         puts(" pictures, ");
         put_rate(options.pictures, t1 - t0, (uint32_t)clock_hz());
-        puts(" a second\n");
+        puts(" a second, ");
+        puts(options.sync ? "in step" : "unsynced");
+        puts(dma != 0 ? ", by DMA\n" : ", by the CPU\n");
     }
     rv_halt(BOOT_CAP_HALT, 0);
     return 0;

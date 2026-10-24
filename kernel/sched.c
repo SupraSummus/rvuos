@@ -3,6 +3,7 @@
  * See DESIGN.md, "Scheduling".
  */
 
+#include "dma.h"
 #include "irq.h"
 #include "kernel.h"
 #include "object.h"
@@ -1151,6 +1152,10 @@ bool sched_forget(struct obj_header *o, bool preempt)
     case CAP_ROUTE:
         /* Its ends were cleared with the object's nodes, which disarmed it; the channel is free again. */
         route_forget((struct route *)o);
+        break;
+    case CAP_DMA:
+        /* Its ends were cleared with the object's nodes, which halted it; the channel is free again. */
+        dma_forget((struct dma *)o);
         break;
     case CAP_THREAD: {
         struct thread *t = (struct thread *)o;

@@ -259,6 +259,7 @@ until the maintainer decides otherwise.
     and the windows would take a block of RAM the board names, granted as a frame of its own,
     or an operation that binds a frame to a master, which deleting the frame undoes.
     Trust is simpler than either.
+    A controller apart from the devices it feeds is the kernel's instead, its channels lent on ranges it checks; decision 42.
     A driver's connections of `user/lib/bulk.h` rest on it: the driver hands its device only buffers its end names,
     and lets go of a closed connection only once its device no longer uses them; see "Bulk data".
 
@@ -961,3 +962,34 @@ until the maintainer decides otherwise.
     Rejected: `mcounteren.TM` switched with the process that holds a capability for it, a CSR and a case for one board;
     letting the C5's faulting load through, since the core delivers the value before it reports the fault,
     a trap a read on a behaviour Espressif documents nowhere.
+
+42. **DMA through the kernel.**
+    Decided: `DmaLine` and `Dma`, as "DMA" says, the ESP32-C5's GDMA the first controller, its three transmit channels lent,
+    then the ESP32-C6's, which shares its driver, and RP2350's DMA, its sixteen channels, each feeding a PIO state machine;
+    the kernel writes what a channel reads of where to move bytes, on a range of a frame it checked,
+    and halts the channel before it lets go of either end, which `make dma-test` holds each board's controller to on silicon.
+    The first use is the LCD's pictures, `user/lcd/`, which SPI2 sent from its 64-byte buffer a load at a time:
+    by DMA the veins scene draws half again as many pictures unsynced as the CPU's loads let it,
+    so in step with the refresh the CPU has a good part of each picture's time to spare.
+    Weighed:
+    - **Trust**, decision 13's for a device that is a bus master: the driver holds the controller and reaches all RAM;
+      fit for a driver trusted as the root task is, not for a screen's.
+    - **The controller's own filter**, the GDMA's window, RP2350's DMA MPU, the RISC-V IOPMP:
+      the program writes its descriptors, and the kernel sets the window to the frames it connected.
+      A start costs no call, but the windows are one set every channel and every mode share, as decision 13 found of the APM,
+      so it confines a driver only while it is the only one; the C5 keeps its window on the SRAM besides.
+    - **Refusing what would take an end away while a transfer runs**, a pin on the memory, instead of a halt:
+      a child could keep its parent's memory by starting a transfer that a device never finishes; see "DMA".
+    - **Copies by the kernel**: decision 34.
+    Open:
+    - **Receiving**, the GDMA's receive channels and RP2350's channels from a PIO block's receive FIFOs, which write memory:
+      a halt must then be known to stop the last write, which a measurement on the board has yet to show;
+      `user/dma/`'s loop on RP2350 would show it, a state machine feeding the channel what the CPU gives it.
+    - **A transfer's end as an interrupt**, which the kernel would take and signal as an `Irq` does;
+      the C5's LCD learns the end from SPI2, whose registers it holds, and the GDMA's own status lies with the kernel.
+    - **A chain of transfers** the kernel starts one after another at the controller's interrupt, work on that path.
+    - **RP2350's DMA as a router**, decision 37: a channel paced by a device that writes one word to a register;
+      the kernel lends its channels to move memory to a FIFO alone, so a `Dma` cannot be one.
+    - **The nRF52840's EasyDMA**, whose pointers lie in each device's own registers, which the device's holder writes,
+      so the device stays trusted; to lend it the kernel would hold the device's pointers,
+      which share the device's block with the rest of its registers, and so the device whole.

@@ -40,6 +40,7 @@
 
 #define RESETS_RESET      0x40020000u
 #define RESETS_RESET_DONE 0x40020008u
+#define RESET_DMA         (1u << 2)
 #define RESET_IO_BANK0    (1u << 6)
 #define RESET_PADS_BANK0  (1u << 9)
 #define RESET_PIO0        (1u << 11)
@@ -218,6 +219,8 @@ void board_init(void)
      * the masks let it reach, which are all of them; the kernel drives none.
      */
     unreset(RESET_DEVICE_RANGES);
+    /* The DMA, whose channels the kernel lends, see dma.c, and which stays shut to user mode. */
+    unreset(RESET_DMA);
     open_to_user(ACCESSCTRL_IO_BANK0);
     open_to_user(ACCESSCTRL_PADS_BANK0);
     open_to_user(ACCESSCTRL_PIO0);

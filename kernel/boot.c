@@ -3,6 +3,7 @@
  * See DESIGN.md, "Boot".
  */
 
+#include "dma.h"
 #include "irq.h"
 #include "kernel.h"
 #include "klog.h"
@@ -147,6 +148,8 @@ struct thread *boot_create_root(void)
         [BOOT_CAP_TEST] = { .type = CAP_TEST, .rights = RIGHT_ALL },
         /* Every channel the board's router lends, and nothing on a board without one. */
         [BOOT_CAP_ROUTES] = ROUTE_CHANNELS != 0 ? cap_to_routes(ROUTE_FIRST, ROUTE_CHANNELS, RIGHT_W) : (struct cap){ 0 },
+        /* Every channel the board's DMA controller lends, and nothing on a board without one. */
+        [BOOT_CAP_DMA] = DMA_CHANNELS != 0 ? cap_to_dma(DMA_FIRST, DMA_CHANNELS, RIGHT_W) : (struct cap){ 0 },
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_DEVICES; i++) {
         if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM || boot[i].type == CAP_NONE) {

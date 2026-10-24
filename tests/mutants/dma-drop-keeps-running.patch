@@ -1,0 +1,20 @@
+A Dma whose end goes keeps its channel running.
+The controller would go on reaching memory, or feeding a device, its holder no longer holds;
+a channel runs only with both its ends.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: dma's channel moves bytes to or from another device than its own
+Report: dma's channel runs without both its ends
+Witness: fuzz dma-dies-with-pool
+
+diff --git a/kernel/dma.c b/kernel/dma.c
+--- a/kernel/dma.c
++++ b/kernel/dma.c
+@@ -50,7 +50,6 @@ bool dma_busy(const struct dma *d)
+ void dma_drop(struct cap *end)
+ {
+     struct dma *d = p2v(cap_holder(end));
+-    dmac_halt(d->channel);
+     d->names[end - d->ends] = 0;
+     *end = (struct cap){ 0 };
+ }

@@ -2,6 +2,7 @@
  * Kernel entry after start.S: the boot, and the idle a core enters as a trap ends with nobody's turn.
  */
 
+#include "dma.h"
 #include "irq.h"
 #include "kernel.h"
 #include "klog.h"
@@ -51,6 +52,8 @@ void kmain(void)
     irq_init();
     /* Every channel the kernel lends wires nothing until a Route is armed on it, as every line is masked. */
     route_init();
+    /* Every channel the kernel lends moves nothing until a Dma is started on it. */
+    dma_init();
 #if CORES > 1
     /*
      * This core takes the others' interrupts from now on, which wake it and make it trap.

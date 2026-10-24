@@ -32,7 +32,7 @@ and a process with one table names its slots by their indices.
 A slot is empty or holds one capability:
 a type, a set of rights, and two words the kernel interprets by type.
 Userspace never sees a slot's links, nor the address of an object,
-but whoever holds a capability may ask what it is, with no right, `OP_CAP_INFO`, section 6.15:
+but whoever holds a capability may ask what it is, with no right, `OP_CAP_INFO`, section 6.16:
 its type, its rights and what it names, what a frame covers, say.
 
 Every system call is an invocation on the capability in one slot.
@@ -104,6 +104,8 @@ The tree grows in these ways:
 | `OP_TIME_BIND` | the thread's hold on its units hangs below the invoked `Time` capability |
 | `OP_ROUTE_BIND` | below the `KernelPool` capability; the channel goes with what was derived from it |
 | `OP_ROUTE_END` | the `Route`'s hold on the end hangs below the `Frame` capability |
+| `OP_DMA_BIND` | below the `KernelPool` capability; the channel goes with what was derived from it |
+| `OP_DMA_END` | the `Dma`'s hold on the end hangs below the `Frame` capability |
 | boot | nowhere, but for the root task's frames and the boot pool's block, below `BOOT_CAP_ROOT_RAM`, the boot pool's own node, below that block, and the capabilities to the boot pool and its objects, below that node |
 
 `OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
@@ -112,7 +114,8 @@ every region installed from any of them,
 and every thread's units bound through any of them;
 a thread made through any of them loses its process and stops, section 5.6,
 an `Irq` bound through any of them loses its notification and is disarmed, section 5.9,
-and a `Route` connected through any of them loses that end and is disarmed, section 5.13.
+a `Route` connected through any of them loses that end and is disarmed, section 5.13,
+and a `Dma` connected through any of them loses that end and its channel stops, section 5.14.
 Below an Untyped it destroys every pool made of it, section 5.5.
 The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
@@ -152,12 +155,14 @@ Programs are encouraged to keep the same convention.
 | `Time` | `CAP_TIME` | none: the slot holds the first unit and a count | boot, `OP_TIME_CARVE` |
 | `RouteLine` | `CAP_ROUTE_LINE` | none: the slot holds the first channel and a count | boot, `OP_ROUTE_CARVE` |
 | `Route` | `CAP_ROUTE` | one channel, its two ends and whether it is armed | `OP_ROUTE_BIND` |
+| `DmaLine` | `CAP_DMA_LINE` | none: the slot holds the first channel and a count | boot, `OP_DMA_CARVE` |
+| `Dma` | `CAP_DMA` | one channel and its two ends | `OP_DMA_BIND` |
 | `Print` | `CAP_PRINT` | none | boot |
 | `Halt` | `CAP_HALT` | none | boot |
 | `Test` | `CAP_TEST` | none | boot |
 | `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
-`Untyped`, `Frame`, `IrqLine`, `Time`, `RouteLine`, `Print`, `Halt`, `Test` and `Clock` capabilities have no kernel object behind them.
+`Untyped`, `Frame`, `IrqLine`, `Time`, `RouteLine`, `DmaLine`, `Print`, `Halt`, `Test` and `Clock` capabilities have no kernel object behind them.
 Carving a frame, a range of lines, units or channels, retyping an Untyped into a frame and splitting one,
 are pure table operations
 that touch no kernel memory,
@@ -259,6 +264,7 @@ Today's sizes, as the kernel rounds them:
 | `Notification` | 16 |
 | `Irq` | 48 |
 | `Route` | 64 |
+| `Dma` | 64 |
 
 A minimal child process, table of 10 slots, process of two region slots, thread of one place and two notifications,
 costs 624 bytes including the descriptor on RISC-V, 16 more on the ESP32-C6, and 560 on ARM;
@@ -721,7 +727,7 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   since a turn elsewhere puts it at the back of their queues; to every other thread they promise what they did.
 - A thread runs in **requests**, each due a span past the virtual time it starts at:
   the span its last wait gave, `OP_NOTIFY_WAIT` or `OP_NOTIFY_LEND`, or its binding's, `OP_TIME_BIND`, sections 6.9 and 6.13,
-  or the default span for none, the longest power of two of counts within a millisecond, which `OP_CAP_INFO` on a `Clock` tells, section 6.15.
+  or the default span for none, the longest power of two of counts within a millisecond, which `OP_CAP_INFO` on a `Clock` tells, section 6.16.
   A request is over once the thread has run its units' part of the span, its virtual time having reached the deadline.
   A request starts as the thread is made ready or bound, and the next as one is over,
   at the latest of its virtual time and the clock, and only once its virtual time lies at most a span ahead of the clock.
@@ -875,3 +881,41 @@ A `Route` holds each end by a capability derived from the `Frame` capability it 
 so whoever lent the device takes the wire back by revoking below its frame, which disarms the `Route`;
 connecting an end it had disarms it, so it never wires a new end to the other's old partner.
 The destroy of the `Route`'s pool disarms it too, and frees the channel.
+
+### 5.14 DMA
+
+A device that moves bytes by itself, a DMA controller's channel, frees the CPU from feeding it a word at a time,
+but it reaches whatever it is pointed at, PMP or not.
+So where a board's DMA controller lies apart from the devices it feeds, the kernel keeps its registers
+and lends its channels, as it lends a router's, and points a channel only at memory the driver holds.
+The root task receives every channel it lends in `BOOT_CAP_DMA`, a `DmaLine`, and carves single channels out with `OP_DMA_CARVE`;
+on a board that lends none the slot is empty, and on QEMU's boards four channels move nothing, for tests.
+
+`OP_DMA_BIND` turns a one-channel capability into a `Dma` object in a pool of the driver's choosing,
+connected to nothing and moving nothing, and consumes the invoked slot; a channel is bound at most once.
+`OP_DMA_END` connects the `Dma`'s source and its sink, each by a `Frame` capability, with `RIGHT_R` for the source and `RIGHT_W` for the sink.
+The board says which end of each channel lies in memory, named 0, and the other is a device,
+named by the request the controller takes for it, through a frame over the device's registers; section 3.
+`OP_DMA_START` moves the bytes at an offset into the memory end's frame, of a length,
+whole grains of the board's and at most its longest transfer, section 3; the device paces them.
+The kernel checks the range, so a driver cannot point a channel past its own frame, whatever it writes meanwhile;
+a channel moves nothing the driver could not move by loads and stores to the two frames, only without the CPU.
+`OP_CAP_INFO` tells whether a transfer may still reach the memory, and a start while one may fails with `KERR_STATE`;
+`OP_DMA_STOP` stops it before its end.
+
+```c
+/* SPI2 sends n bytes from offset of FRAME, which the program maps too, while the program goes on */
+rv_invoke(OP_DMA_CARVE, BOOT_CAP_DMA, 0, 1, CHANNEL);
+rv_invoke(OP_DMA_BIND, CHANNEL, POOL, DMA, 0);
+rv_invoke(OP_DMA_END, DMA, DMA_SOURCE, FRAME, 0);
+rv_invoke(OP_DMA_END, DMA, DMA_SINK, BOOT_CAP_SPI2, DMA_REQUEST_SPI2);
+/* ... the bytes written into FRAME, SPI2 set to take its data from the DMA for n bytes ... */
+rv_invoke(OP_DMA_START, DMA, offset, n, 0);
+```
+
+A `Dma` holds each end by a capability derived from the `Frame` capability it was connected through,
+so whoever lent the memory or the device takes it back by revoking below its frame,
+which stops the channel before the revoke returns, a transfer under way or not;
+connecting an end it had stops it too, and so does the destroy of the `Dma`'s pool, which frees the channel.
+The bytes a transfer reads may change while it runs, which is the driver's affair:
+it writes the next ones into another buffer, or waits for the transfer's end.

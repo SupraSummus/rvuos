@@ -54,14 +54,15 @@ Every process's table slot is empty or names a live table, with the right to wri
 every thread's process slot is empty or names a live process,
 every thread's watch is empty or names a live notification,
 every `Irq`'s notification slot is empty or names a live notification,
-and every `Route`'s end is empty or names a frame its router finds the end in.
+every `Route`'s end is empty or names a frame its router finds the end in,
+and every `Dma`'s end is empty or names a frame its controller finds the end in.
 
 **Derivation.**
 The slots of every live table,
 the table slots and region slots of every live process,
 the process, units and watch of every live thread,
 the notification of every live `Irq`,
-the ends of every live `Route`
+the ends of every live `Route` and `Dma`
 and the own node of every pool
 are the nodes of one forest.
 Every link of a filled node lands on a live, filled node;
@@ -75,7 +76,7 @@ and a capability to a pool or an object is never one, nor a thread's process or 
 A node is derived from its parent:
 the same object with no more rights, and for a notification no more bits to signal,
 a range within the parent's range with no more rights,
-a pool's own node on an Untyped, an installed region or a `Route`'s end on a frame,
+a pool's own node on an Untyped, an installed region or a `Route`'s or a `Dma`'s end on a frame,
 a thread's units on a capability to units that holds them, the first of them even for none,
 a thread's process or watch or an `Irq`'s notification on a capability to that object,
 the watch and the `Irq` with no more bits to signal, or on that object's pool or its pool's own node,
@@ -90,10 +91,10 @@ each object records the pool it lies in and where the one before it lies,
 the newest is the one the descriptor names,
 and pools are pairwise disjoint.
 A pool half destroyed is a pool like any other, with fewer objects.
-The line table names exactly the bound `Irq`s, the channel table exactly the bound `Route`s,
+The line table names exactly the bound `Irq`s, the channel tables exactly the bound `Route`s and `Dma`s,
 and every node an object holds whose holder hears of its clearing names that holder:
 an installed region its process, a thread's process and units the thread, an `Irq`'s notification the `Irq`,
-and a `Route`'s ends the `Route`.
+and a `Route`'s or a `Dma`'s ends the `Route` or the `Dma`.
 No capability in a table names a holder,
 no node carries bits its type has no use for,
 and every `Notification` capability names a block of bits.
@@ -170,6 +171,16 @@ A `Route` is armed only with both its ends,
 and the router connects a channel exactly while a `Route` armed on it is, from its event to its task,
 read back from the router itself:
 a set arms or disarms it, and a revoke above an end and the destroy of its pool disarm it.
+
+**DMA.**
+Every `Dma` names a channel the kernel lends, and at most one is bound to any channel.
+Each end is a leaf of the derivation tree,
+connected through a frame with the right to read for the source and to write for the sink,
+and names an end its board's controller finds in that frame.
+A channel that may still reach memory belongs to a `Dma` with both its ends,
+reaches nothing beyond its memory end's frame and moves bytes to or from its device end's device alone,
+read back from the controller and what it reads:
+a start runs it, and a stop, a new end, a revoke above an end and the destroy of its pool halt it.
 
 **Timer lines.**
 An `Irq` armed on a timer line has its deadline ahead of the clock:

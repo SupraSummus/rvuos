@@ -10,10 +10,12 @@
  * the ROM, read and execute, the random number generator's data register, read only,
  * the IO MUX and the GPIO matrix, read and write, the pins' functions, routes and levels,
  * HP_SYSTEM, read and write, whose SRAM_USAGE gives a bank of SRAM to the modem's dump engine,
- * and UTIME, the CLINT's copy of mtime for user mode, read only.
+ * UTIME, the CLINT's copy of mtime for user mode, read only,
+ * and SPI2, read and write, the general-purpose SPI controller, whose clocks the kernel sets: 80 MHz for its master clock,
+ * which reaches memory only by a channel of BOOT_CAP_DMA, its request DMA_REQUEST_SPI2.
  * A frame maps at its own address, so a program names a register by the device's base.
  */
-#define BOOT_DEVICES 10
+#define BOOT_DEVICES 11
 #define BOOT_CAP_SARADC (BOOT_CAP_DEVICES + 0) /* the SAR ADC and the temperature sensor, 4 KiB */
 #define BOOT_CAP_MODEM  (BOOT_CAP_DEVICES + 1) /* the modem, 64 KiB, with its MACs, which are bus masters */
 #define BOOT_CAP_EFUSE  (BOOT_CAP_DEVICES + 2) /* the eFuse's registers, read only, 1 KiB */
@@ -24,6 +26,10 @@
 #define BOOT_CAP_GPIO   (BOOT_CAP_DEVICES + 7) /* the GPIO matrix, the pins' routes and levels, 4 KiB */
 #define BOOT_CAP_HP_SYSTEM (BOOT_CAP_DEVICES + 8) /* HP_SYSTEM, which hands SRAM's banks to the dump engine, 4 KiB */
 #define BOOT_CAP_COUNTER (BOOT_CAP_DEVICES + 9) /* UTIME, read only, 8 bytes */
+#define BOOT_CAP_SPI2   (BOOT_CAP_DEVICES + 10) /* SPI2, the general-purpose SPI controller, 4 KiB */
+
+/* SPI2's request, as OP_DMA_END names the device a channel feeds. */
+#define DMA_REQUEST_SPI2 0u
 
 /* The further block of RAM the boot grants as an Untyped from BOOT_CAP_RAM_BLOCKS up, beside the free RAM. */
 #define BOOT_RAM_BLOCKS 1
@@ -46,6 +52,7 @@
 #define IO_MUX_BASE       0x60090000u
 #define GPIO_BASE         0x60091000u
 #define HP_SYSTEM_BASE    0x60095000u
+#define SPI2_BASE         0x60081000u
 #define FLASH_WINDOW_BASE  0x42000000u
 #define FLASH_WINDOW_FLASH 0x00210000u /* where the window's first byte lies in flash */
 

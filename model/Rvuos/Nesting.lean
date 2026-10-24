@@ -11,9 +11,12 @@ namespace Rvuos
 
 namespace State
 
-/-- The memory a node stands for, `node_range`: a frame's, an installed region's, a Route's end's, an Untyped's block, a pool's. -/
+/--
+The memory a node stands for, `node_range`:
+a frame's, an installed region's, a Route's or a Dma's end's, an Untyped's block, a pool's.
+-/
 def range? (s : State) (c : Cap) : Option (Nat × Nat) :=
-  if c.type == capFrame || c.type == capInstalled || c.type == capRouted then some (c.a, c.b)
+  if c.type == capFrame || c.type == capInstalled || c.type == capRouted || c.type == capChannelled then some (c.a, c.b)
   else if c.type == capUntyped then
     some ((blockBase (BitVec.ofNat 32 c.a)).toNat, (blockSize (BitVec.ofNat 32 c.a)).toNat)
   else if c.type == capRetyped then (s.obj? c.a).map fun o => (c.a, o.size)

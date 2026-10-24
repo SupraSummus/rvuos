@@ -40,7 +40,7 @@ enum arg_kind {
     ARG_FLAGS,        /* OP_IRQ_SET's */
     ARG_STEPS,        /* OP_TEST_PREEMPT's */
     ARG_ADDRESS,      /* of a load or a store */
-    ARG_END,          /* a Route's end, ROUTE_EVENT or ROUTE_TASK, or OP_ROUTE_SET's on or off */
+    ARG_END,          /* a Route's end, ROUTE_EVENT or ROUTE_TASK, OP_ROUTE_SET's on or off, or a Dma's end */
     ARG_NAME,         /* an end within a frame, as the board names it */
     ARG_SPAN,         /* a wait's: 0 to keep, else a power of two of counts */
 };
@@ -130,13 +130,18 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_ROUTE_END, CAP_ROUTE, 0, ARG_END, ARG_FRAME, ARG_NAME),
     OP(OP_ROUTE_SET, CAP_ROUTE, 0, ARG_END, ARG_NONE, ARG_NONE),
     OP(OP_THREAD_OVERRUNS, CAP_THREAD, 0, ARG_NONE, ARG_NONE, ARG_NONE),
+    OP(OP_DMA_CARVE, CAP_DMA_LINE, CAP_DMA_LINE, ARG_OFFSET, ARG_COUNT, ARG_DST),
+    OP(OP_DMA_BIND, CAP_DMA_LINE, CAP_DMA, ARG_POOL, ARG_DST, ARG_NONE),
+    OP(OP_DMA_END, CAP_DMA, 0, ARG_END, ARG_FRAME, ARG_NAME),
+    OP(OP_DMA_START, CAP_DMA, 0, ARG_OFFSET, ARG_SIZE, ARG_NONE),
+    OP(OP_DMA_STOP, CAP_DMA, 0, ARG_NONE, ARG_NONE, ARG_NONE),
 };
 
 #undef OP
 #undef DESCRIBE
 
 /* The assert sees only the highest code; LLVMFuzzerInitialize holds every code below it to an entry. */
-_Static_assert(OP_COUNT == 48 && OP_THREAD_OVERRUNS == OP_COUNT - 1, "a new operation needs an entry in op_table");
+_Static_assert(OP_COUNT == 53 && OP_DMA_STOP == OP_COUNT - 1, "a new operation needs an entry in op_table");
 
 /* A code below OP_COUNT that is no operation any more, see OP_COUNT, which the kernel refuses as any other. */
 static inline int op_retired(unsigned op)

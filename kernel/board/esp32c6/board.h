@@ -104,13 +104,15 @@
  * and the IO MUX and the GPIO matrix, the pins, for a program to set as its board wires them,
  * the flash's among them, so that whoever holds the IO MUX can cut the flash off,
  * HP_SYSTEM, whose SRAM_USAGE hands a bank of SRAM to the modem's dump engine, which then writes it,
- * and UTIME, the CLINT's copy of mtime for user mode, read only, for a program to read the counter with no call.
+ * UTIME, the CLINT's copy of mtime for user mode, read only, for a program to read the counter with no call,
+ * and SPI2, the general-purpose SPI controller, read and write, whose clocks board.c sets: 80 MHz for its master clock;
+ * it reaches memory only through the GDMA, which is not listed, so it is no bus master to whoever holds it.
  * PCR, PMU and the LP domain stay the kernel's: they reach the whole chip's clocks, power and resets.
  * The modem's two MACs, Wi-Fi's and 802.15.4's, are bus masters, which nothing confines,
  * so whoever holds the modem reaches all RAM; see DESIGN.md, open decision 13.
  * The dump engine is the modem's too, and whoever holds HP_SYSTEM as well can give it any bank, the kernel's too.
  */
-#define BOOT_DEVICES 10
+#define BOOT_DEVICES 11
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x6000E000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x600A0000), U32(0x00010000), RIGHT_R | RIGHT_W },    \
@@ -121,7 +123,22 @@
     { U32(0x60090000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x60095000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x20001c08), U32(0x00000008), RIGHT_R },
+    { U32(0x20001c08), U32(0x00000008), RIGHT_R },             \
+    { U32(0x60081000), U32(0x00001000), RIGHT_R | RIGHT_W },
+
+/*
+ * The DMA controller: the GDMA's three transmit channels, each reading memory into a device, SPI2 the one listed,
+ * whose request is 0; a transfer is whole words, and at most DMA_DESCRIPTORS of the GDMA's 4092-byte descriptors long.
+ * The C6's is the GDMA's first version, with no window onto memory. See esp32/dma.c.
+ */
+#define DMA_FIRST        0u
+#define DMA_CHANNELS     3u
+#define DMA_GRAIN        4u
+#define DMA_DESCRIPTORS  8u
+#define DMA_MOST         (DMA_DESCRIPTORS * 4092u)
+#define GDMA_V2          0
+#define GDMA_PCR_CONF    U32(0x600960BC)
+#define GDMA_DEVICE_LIST { 0u, U32(0x60081000), U32(0x00001000) },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

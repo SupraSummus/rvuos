@@ -82,6 +82,17 @@
 #define ROUTE_FIRST    0u
 #define ROUTE_CHANNELS 4u
 
+/*
+ * QEMU's virt machine lends no DMA controller, and neither does the host, which shares this board:
+ * dma.c's stands in, four channels that move nothing,
+ * so that a Dma is bound, connected, started and revoked here as on a board with one; see DESIGN.md, "DMA".
+ */
+#define DMA_FAKE     1
+#define DMA_FIRST    0u
+#define DMA_CHANNELS 4u
+#define DMA_GRAIN    4u
+#define DMA_MOST     4096u
+
 /* The mcause, and the mie and mip bit, of the core's interrupt from the controller. */
 #define IRQ_EXT_CAUSE 11
 
