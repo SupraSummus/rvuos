@@ -22,6 +22,10 @@
  * dsts=, the ping's destination, the nRF52840's 0x5284, 21124, by default: another is a control, a ping it does not acknowledge.
  * slows=1 plays the frame at 16 MS/s, 8 samples a chip, CLK_DATA_DUMP_MUX cleared while it plays, see hw/dump.md, "A player":
  * a ping then fits one play.
+ * dcs=1 sends the frame through the transmitter's DC word instead, with no player, the CPU storing the samples
+ * one after the other at the rate a calibration times, see hw/phy.md, "The DC word".
+ * Each sample is held till the next, so the stream's images stand at that rate and twice it to each side of the frame,
+ * and the band must hold them: channel 7 and below=2, 2440 MHz, for one.
  * Each is a list in decimal, commas between, a minus allowed in offs=, up to SETTINGS_MAX long,
  * and a list of one holds for every setting; the frames take the settings in turn,
  * so that one run, every setting in the same while and the same air, measures them all against each other.
@@ -110,9 +114,14 @@ static volatile uint32_t *const bank = (volatile uint32_t *)(uintptr_t)DUMP_BANK
 static int up, looped;
 static uint32_t looped_lb;
 
+static uint32_t txdc_was;
+
 void drv_radio_off(void)
 {
     REG(PLAY) = 0;
+    if (up) {
+        REG(MODEM_BASE + 0x444u) = txdc_was;
+    }
     if (looped) {
         looped = 0;
         drv_phy_loopback(0, 0);
@@ -162,7 +171,7 @@ static void spell(const uint8_t *frame, uint32_t bytes)
 }
 
 struct setting {
-    int32_t amp, off_khz, conj, lb, gap, dst, slow;
+    int32_t amp, off_khz, conj, lb, gap, dst, slow, dc;
 };
 
 /* The half sine's kth sample of 2 spc, of 20 or 8 samples a chip. */
@@ -210,6 +219,130 @@ static uint32_t make(const uint8_t *frame, uint32_t bytes, const struct setting 
         }
     }
     return rest;
+}
+
+/* The DC word, FEDATA 0x600A0444, which the CPU writes a sample at a time; no clock but the loop's paces it. */
+#define FE_TXDC      (MODEM_BASE + 0x444u)
+#define TXDC_IQ      0xfffffu
+#define CHIP_HZ      2000000u
+#define DC_RATE_MIN  4000000u /* two samples a chip at least */
+#define DC_RATE_MAX  20000000u
+#define DC_SHORT     1000u    /* the calibration's two streams, the difference their time's */
+#define DC_LONG      6000u
+#define DC_SPAN_US   4000u    /* at least: 6.6 ms as a power of two of 160 MHz's counts, 820 us of it the eight units' */
+#define DC_TRIES     20u
+#define BAND_LOW_KHZ  2400000
+#define BAND_HIGH_KHZ 2483500
+
+/*
+ * The frame's samples into the bank from its first word, at rate samples a second, as make's are at 40 MS/s,
+ * each at its own time: the chip it falls in and where in that chip's half sine, I the even chips and Q the odd
+ * half a chip later; how many.
+ */
+static uint32_t make_dc(const uint8_t *frame, uint32_t bytes, const struct setting *s, int32_t shift_hz, uint32_t rate)
+{
+    uint32_t chips = bytes * 64u;
+    uint64_t chip_step = ((uint64_t)CHIP_HZ << 32) / rate; /* chips a sample, 32 bits of fraction */
+    uint32_t total = (uint32_t)(((uint64_t)(chips + 1u) << 32) / chip_step) + 1u;
+    uint32_t step = (uint32_t)(int32_t)(((int64_t)shift_hz << 32) / (int64_t)rate), phase = 0;
+    spell(frame, bytes);
+    for (uint32_t n = 0; n < total; n++) {
+        uint64_t at = (uint64_t)n * chip_step; /* the sample's time in chips, 32 bits of fraction */
+        uint32_t pair = (uint32_t)(at >> 33), into = (uint32_t)(at >> 26) & 127u; /* the two-chip half sine and where in it */
+        int32_t i = 2u * pair < chips ? chip_of[2u * pair] * sine(into) : 0, q = 0;
+        if (at >= (1ull << 32)) {
+            uint64_t late = at - (1ull << 32);
+            uint32_t qpair = (uint32_t)(late >> 33), qinto = (uint32_t)(late >> 26) & 127u;
+            q = 2u * qpair + 1u < chips ? chip_of[2u * qpair + 1u] * sine(qinto) : 0;
+        }
+        uint32_t turn = phase >> 24;
+        int32_t c = sine(turn + 64u), sn = sine(turn);
+        phase += step;
+        int32_t si = ((i * c - q * sn) >> 10) * s->amp >> 10, sq = ((i * sn + q * c) >> 10) * s->amp >> 10;
+        if (s->conj) {
+            sq = -sq;
+        }
+        bank[n] = (txdc_was & ~TXDC_IQ) | ((uint32_t)sq & 0x3ffu) << 10 | ((uint32_t)si & 0x3ffu);
+    }
+    return total;
+}
+
+/* The bank's first n words stored into the DC word, as fast as the CPU stores; the calibration's and the frames' one loop. */
+__attribute__((noinline)) static void dc_stream(uint32_t n)
+{
+    volatile uint32_t *w = (volatile uint32_t *)(uintptr_t)FE_TXDC;
+    const volatile uint32_t *from = bank;
+    for (uint32_t k = 0; k < n; k++) { /* bounded by n, the bank's words at most */
+        *w = from[k];
+    }
+    *w = txdc_was;
+}
+
+/* The counter's count now, and its rate into hz: the CPU's cycles on the C6, where osi_now_us keeps whole microseconds. */
+static uint64_t dc_counts(struct drv *d, uint32_t *hz)
+{
+    uint64_t now;
+    uint32_t counter;
+    rv_clock_read(d->clock, &now, hz, &counter);
+    return now;
+}
+
+/*
+ * A sleep of ms on the program's own timer, the request its wake begins due DC_SPAN_US later or up to twice that:
+ * the thread's units' part of it is the stream's to run whole, see MANUAL.md, section 5.11,
+ * once the sleep has brought its virtual time back to the clock, so ms is the span at least.
+ * At the default span the request is some 128 us, and a stream of 390 us lost the core for 100 to 800 us.
+ * The span holds for the thread's later waits too, which give none. What the parent wrote meanwhile is answered.
+ */
+static void dc_sleep(struct drv *d, uint32_t ms)
+{
+    uint32_t hz, bits = 0, other = 0;
+    (void)dc_counts(d, &hz);
+    uint64_t counts = (uint64_t)hz * DC_SPAN_US / 1000000u;
+    uint32_t span = rv_span(counts > 0x40000000u ? 0x80000000u : (uint32_t)(2u * counts - 1u));
+    rv_timer_set(CHILD_TIMER, CHILD_BIT_TIMER, ms * 1000u);
+    while (!(bits & CHILD_BIT_TIMER)) { /* bounded by the timer's ms */
+        if (rv_wait_within(CHILD_INBOX, span, &bits) != KERR_OK) {
+            break;
+        }
+        other |= bits;
+    }
+    if (other & ~CHILD_BIT_TIMER) {
+        child_answer(&d->c);
+    }
+}
+
+/* A stream of the bank's first n words, each after a sleep of ms, the shortest of DC_TRIES; in counts. */
+static uint32_t dc_time(struct drv *d, uint32_t n, uint32_t ms)
+{
+    uint32_t best = 0xffffffffu, hz;
+    for (uint32_t t = 0; t < DC_TRIES; t++) {
+        dc_sleep(d, ms);
+        uint64_t start = dc_counts(d, &hz);
+        dc_stream(n);
+        uint32_t took = (uint32_t)(dc_counts(d, &hz) - start);
+        best = took < best ? took : best;
+    }
+    return best;
+}
+
+/*
+ * The store loop's rate, from two streams' times, so that what the clock's reading costs drops out,
+ * the loopback on, with the quiet value, as for the frames: a frame drifts by its chips times the rate's error,
+ * so the counter's counts time it, not microseconds, whose rounding alone was a few tenths of a percent.
+ */
+static uint32_t dc_calibrate(struct drv *d, uint32_t ms)
+{
+    uint32_t hz;
+    (void)dc_counts(d, &hz);
+    for (uint32_t k = 0; k < DC_LONG; k++) {
+        bank[k] = txdc_was;
+    }
+    uint32_t short_c = dc_time(d, DC_SHORT, ms), long_c = dc_time(d, DC_LONG, ms);
+    uint32_t rate = long_c > short_c ? (uint32_t)((uint64_t)(DC_LONG - DC_SHORT) * hz / (long_c - short_c)) : 0;
+    drv_say("synth154: the DC word's loop: %u words in %u counts, %u in %u, at %u Hz: %u samples a second\n", DC_SHORT,
+            short_c, DC_LONG, long_c, hz, rate);
+    return rate;
 }
 
 static uint64_t played_end; /* when the last play's end was seen */
@@ -313,16 +446,17 @@ static void spread(struct drv *d, const char *key, int32_t dflt, struct setting 
     for (uint32_t k = 0; k < n; k++) {
         int32_t x = got == 0 ? dflt : got == 1 ? v[0] : v[k];
         int32_t *f = field == 0 ? &s[k].amp : field == 1 ? &s[k].off_khz : field == 2 ? &s[k].conj
-                   : field == 3 ? &s[k].lb : field == 4 ? &s[k].gap : field == 5 ? &s[k].dst : &s[k].slow;
+                   : field == 3 ? &s[k].lb : field == 4 ? &s[k].gap : field == 5 ? &s[k].dst : field == 6 ? &s[k].slow
+                   : &s[k].dc;
         *f = x;
     }
 }
 
 static uint32_t settings(struct drv *d, struct setting *s)
 {
-    static const char *const keys[7] = { "amps", "offs", "conjs", "lbs", "gaps", "dsts", "slows" };
+    static const char *const keys[8] = { "amps", "offs", "conjs", "lbs", "gaps", "dsts", "slows", "dcs" };
     uint32_t n = 1;
-    for (uint32_t k = 0; k < 7u; k++) {
+    for (uint32_t k = 0; k < 8u; k++) {
         int32_t v[SETTINGS_MAX];
         uint32_t got = list_of(d, keys[k], v);
         n = got > n ? got : n;
@@ -334,12 +468,14 @@ static uint32_t settings(struct drv *d, struct setting *s)
     spread(d, "gaps", GAP_DEFAULT, s, n, 4);
     spread(d, "dsts", ADDR_NRF, s, n, 5);
     spread(d, "slows", 0, s, n, 6);
+    spread(d, "dcs", 0, s, n, 7);
     for (uint32_t k = 0; k < n; k++) {
         drv_must("amps= of 0 to AMP_MAX", s[k].amp >= 0 && s[k].amp <= AMP_MAX ? ESP_OK : ESP_FAIL);
         drv_must("offs= within OFF_MAX_KHZ", s[k].off_khz >= -OFF_MAX_KHZ && s[k].off_khz <= OFF_MAX_KHZ ? ESP_OK : ESP_FAIL);
         drv_must("conjs= of 0 or 1", s[k].conj == 0 || s[k].conj == 1 ? ESP_OK : ESP_FAIL);
         drv_must("lbs= of 0 to 255", s[k].lb >= 0 && s[k].lb <= 255 ? ESP_OK : ESP_FAIL);
         drv_must("slows= of 0 or 1", s[k].slow == 0 || s[k].slow == 1 ? ESP_OK : ESP_FAIL);
+        drv_must("dcs= of 0 or 1", s[k].dc == 0 || s[k].dc == 1 ? ESP_OK : ESP_FAIL);
         drv_must("dsts= of 16 bits", s[k].dst >= 0 && s[k].dst <= 0xffff ? ESP_OK : ESP_FAIL);
         drv_must("gaps= within GAP_MAX", s[k].gap >= -GAP_MAX && s[k].gap <= GAP_MAX ? ESP_OK : ESP_FAIL);
     }
@@ -417,8 +553,33 @@ void drv_run(struct drv *d, struct self *own)
     d->channel = channel;
     child_report(&d->c, DRV_LISTENING);
     drv_say("synth154: kind %u, %u MHz below channel %u, %u settings\n", kind, below, channel, n);
+    txdc_was = REG(FE_TXDC);
+    uint32_t dc_rate = 0, any_dc = 0;
+    for (uint32_t k = 0; k < n; k++) {
+        any_dc |= (uint32_t)s[k].dc;
+    }
+    drv_must("a gap_ms= of twice DC_SPAN_US at least, the sleep that brings the thread's virtual time back",
+             !any_dc || gap_ms * 1000u >= 2u * DC_SPAN_US ? ESP_OK : ESP_FAIL);
+    if (any_dc) {
+        drv_phy_loopback(1, (uint32_t)s[0].lb);
+        dc_rate = dc_calibrate(d, gap_ms);
+        drv_phy_loopback(0, 0);
+    }
+    drv_must("the calibration's rate of DC_RATE_MIN to DC_RATE_MAX",
+             !any_dc || (dc_rate >= DC_RATE_MIN && dc_rate <= DC_RATE_MAX) ? ESP_OK : ESP_FAIL);
+    drv_must("a DC frame's words within the bank's",
+             !any_dc || (uint64_t)FRAME_MAX * 64u * dc_rate / CHIP_HZ + dc_rate / CHIP_HZ + 2u <= DUMP_BANK_SIZE / 4u ? ESP_OK
+                                                                                                         : ESP_FAIL);
+    for (uint32_t k = 0; k < n; k++) {
+        /* The frame's MHz each side, and the stream's first two images, the rate and twice it to each side of the frame. */
+        int32_t at = 2407000 + 5000 * (int32_t)channel - 1000 * (int32_t)below + s[k].off_khz;
+        int32_t reach = 1000 + 2 * (int32_t)(dc_rate / 1000u);
+        drv_must("a DC setting's frame and its stream's first two images within the band, 2400 to 2483.5 MHz",
+                 !s[k].dc || (at - reach >= BAND_LOW_KHZ && at + reach <= BAND_HIGH_KHZ) ? ESP_OK : ESP_FAIL);
+    }
 
     uint32_t sent[SETTINGS_MAX] = { 0 }, plays = 0, unended = 0, made_us = 0;
+    uint32_t dc_least = 0xffffffffu, dc_most = 0, dc_words_last = 0;
     uint8_t frame[FRAME_MAX];
     uint64_t start = osi_now_us(), end = start + (uint64_t)send * 1000000u;
     for (uint64_t now = start; now < end && !d->leave; now = osi_now_us()) { /* bounded by send */
@@ -426,7 +587,14 @@ void drv_run(struct drv *d, struct self *own)
         const struct setting *t = &s[k];
         uint32_t bytes = frame_of(kind, k, t, frame);
         uint64_t made = osi_now_us();
-        uint32_t rest = make(frame, bytes, t, -(int32_t)below * 1000000 + t->off_khz * 1000);
+        int32_t shift_hz = -(int32_t)below * 1000000 + t->off_khz * 1000;
+        uint32_t rest = 0, dc_words = 0;
+        if (t->dc) {
+            dc_words = make_dc(frame, bytes, t, shift_hz, dc_rate);
+            dc_words_last = dc_words;
+        } else {
+            rest = make(frame, bytes, t, shift_hz);
+        }
         made_us = (uint32_t)(osi_now_us() - made);
         if (looped && looped_lb != (uint32_t)t->lb) {
             drv_phy_loopback(0, 0);
@@ -438,7 +606,18 @@ void drv_run(struct drv *d, struct self *own)
             looped_lb = (uint32_t)t->lb;
         }
         uint32_t spc = t->slow ? SLOW_A_CHIP : SAMPLES_A_CHIP, first = bytes * 64u * spc + spc;
-        unended += !play(first < PLAY_COUNT ? first : PLAY_COUNT, rest, (uint32_t)t->slow);
+        if (t->dc) {
+            uint32_t hz;
+            dc_sleep(d, gap_ms);
+            uint64_t at = dc_counts(d, &hz);
+            dc_stream(dc_words);
+            uint32_t took = (uint32_t)(dc_counts(d, &hz) - at);
+            played_end = osi_now_us();
+            dc_least = took < dc_least ? took : dc_least;
+            dc_most = took > dc_most ? took : dc_most;
+        } else {
+            unended += !play(first < PLAY_COUNT ? first : PLAY_COUNT, rest, (uint32_t)t->slow);
+        }
         sent[k]++;
         plays++;
         if (hear != 0 && plays % hear == 0) {
@@ -466,9 +645,12 @@ void drv_run(struct drv *d, struct self *own)
     }
     drv_say("synth154: %u frames played, %u unended, in %u us, the last made in %u us\n", plays, unended,
             (uint32_t)(osi_now_us() - start), made_us);
+    if (any_dc) {
+        drv_say("synth154: the DC word's streams of %u words: %u to %u counts\n", dc_words_last, dc_least, dc_most);
+    }
     for (uint32_t k = 0; k < n; k++) {
-        drv_say("synth154: setting %u: amp %d, off %d kHz, conj %d, lb %d, gap %d, dst %x, slow %d: %u frames\n", k, s[k].amp,
-                s[k].off_khz, s[k].conj, s[k].lb, s[k].gap, (uint32_t)s[k].dst, s[k].slow, sent[k]);
+        drv_say("synth154: setting %u: amp %d, off %d kHz, conj %d, lb %d, gap %d, dst %x, slow %d, dc %d: %u frames\n", k,
+                s[k].amp, s[k].off_khz, s[k].conj, s[k].lb, s[k].gap, (uint32_t)s[k].dst, s[k].slow, s[k].dc, sent[k]);
     }
 
     for (;;) {

@@ -165,10 +165,8 @@ and `prog/loopback.c` captures what the receiver hears, with the dump engine.
   and the tone lies above the carrier, as the dump engine's I is bits 10 to 19.
   The quiet loopback holds a line of its own at +3.01 MHz, 25 dB over its median.
 - The step's ten bits are unsigned, the tone from 0 to 40 MHz above the carrier, not below it from 512 up
-  (measured, `prog/txfilter.c`, `channel=6`, the receiver's gain held at 30 and its filter at 0, 2048 words at 80 MHz,
-  the line's power at a single bin): steps 0x280, 0x300, 0x3C0 and 0x3F0 stood at +25, +30, +37.5 and +39.4 MHz,
-  106.2, 105.4, 102.5 and 101.0 dB, and at the bins of -15, -10, -2.5 and -0.6 MHz, the bits taken as two's complement,
-  52.7, 55.6, 48.4 and 68.4 dB, the floor's; step 0x80 107.8 dB at +5 MHz, 0x1F4 106.3 at +19.5.
+  (measured with 470f67b7's `prog/txfilter.c`, since removed, `channel=6`, 2048 words at 80 MHz):
+  steps 0x280 to 0x3F0 stood at +25 to +39.4 MHz, as strong as 0x80's at +5, and nothing at the bins two's complement gives.
   The DAC sends an image of the line 80 MHz below it, which nears the line and its level as the line nears 40 MHz,
   and outside the band for every channel: `drv_phy_tone_fits` takes steps below 512 alone,
   their image 60 MHz or more from the line, as the calibration's own step 0x80 has it 75 MHz away.
@@ -203,24 +201,27 @@ untested on the C6 there, and drives the ESP32-C5's counterpart from the CPU a s
 - It reads 0x20000000 after the bring-up, the twenty bits 0.
 - Written, it moves the receiver's mean as the player's words do (measured, `prog/txdc.c`, `channel=6`, `raws=0,40,10000,200`,
   two runs of two seconds): 0x40 by (+63, -31), 0x10000 by (+33, +66), a quarter turn on, 0x200 by (-490, +228),
-  as -512 would, and 0 by nothing; with `FE_DAC_SRC` 0x600A0414's bits 0 and 1 at each of 0 to 3 alike,
-  and after the tone generator was started and stopped, as esp-sdr-zephyr turns the transmitter on, alike.
-  No tone is needed: the loopback powers the transmitter.
+  as -512 would, and 0 by nothing.
+  No tone is needed, the loopback powering the transmitter, and `FE_DAC_SRC` 0x600A0414's bits 0 and 1 change nothing
+  (measured with 470f67b7's `srcs=` and `tone=1`, since removed).
 - It adds to what the player plays (measured, `prog/txdc.c`, `play=40`, `raws=40,10000,3c0,0`):
   with both, the mean moved by the sum of what each moved alone, within two counts, in every one of eight.
-- The CPU may play through it: a loop that stores a table's words into it, `stream=`, keeps 8.7 MS/s,
-  some 18 of the CPU's 160 MHz cycles a store, 2000 stores in 229 to 231 us, and a capture at 16 MS/s beside it
-  holds the table's tone, 16 words a period, at +0.555 MHz, 81 dB over the median, for as long as the stores last;
-  its images stand at the store rate's multiples, 24 to 26 dB below, as a sample held until the next one's has them.
-  The bank is not involved, so a stream has no length the bank sets; but the program's thread is the scheduler's:
-  100000 stores took 22 ms, twice their time, while the 512 us the capture saw went undisturbed.
+- The CPU may play through it with the bank free for a capture beside it (measured, `prog/txdc.c`, `stream=`):
+  a loop round a table of a tone keeps 8.7 MS/s, some 18 cycles a store, and the capture holds the tone
+  for as long as the stores last, its images at the store rate's multiples some 25 dB below, as a held sample's are.
+- An IEEE 802.15.4 frame goes out through it whole, the CPU its only clock (measured, `prog/synth154.c`, `dcs=1`):
+  a bare loop of loads and stores keeps ten cycles a store, 16 MS/s, and the nRF52840 heard the frames
+  as often as the player's, at amplitude 300 too, and none of amplitude 0.
+  The stream must be timed in the counter's counts, not in microseconds, whose rounding alone, 0.4 %,
+  drifted the chips enough that only a frame's first three bytes came right;
+  and it must run within one request of the thread's, or it loses the core for hundreds of microseconds
+  and the frame its FCS; see the program's `dc_sleep`.
 - `FEDATA` 0x600A0440, 0x000FFFFF after the bring-up, gates the two (measured, `pokeat=440`):
   with bits 0 to 9 alone set the player passes and the DC word does not, with bits 10 to 19 alone the other way,
   with 0 neither; 0x7FDFF passes both, so it is no scale.
 - `FEDATA` 0x600A0438, 0xF3B333 after the bring-up, scales the player in bits 16 to 23, both I and Q,
   and leaves the DC word as it is (measured, `pokeat=438`, `play=100` and `play=40000`):
-  0x20, 0x40, 0x80, 0xC0 and 0xFF there moved the mean 12, 24, 49, 76 and 99 counts, some 0.38 a step,
-  0x01 nothing, and bits 0 to 15 nothing either way. esp-sdr-zephyr's ESP32-C5 has its DAC's scale at 0x600A0C04,
+  the mean moved in proportion, some 0.38 counts a step from 0x20 to 0xFF, 0x01 nothing, and bits 0 to 15 nothing either way. esp-sdr-zephyr's ESP32-C5 has its DAC's scale at 0x600A0C04,
   bits 8 to 23, a byte a branch.
 - `FEDATA` 0x600A043C, 0xF3B333 too: the player passes with any value in bits 8 to 15 or 16 to 23, at one level whatever
   the value, and not with both 0; 0x600A0448, 0x3FFFF, with bit 17 cleared puts an offset of some 250 counts on the quiet
@@ -230,18 +231,15 @@ untested on the C6 there, and drives the ESP32-C5's counterpart from the CPU a s
 
 On the ESP32-S3 the analog block 0x67's registers 12 and 13 at 0 widen the transmitter's low-pass,
 whose default takes 28 dB off at 20 MHz (jochenhammes's esp32-sdr-trx, 0BSD), and esp-sdr-zephyr names the pairs
-12 and 13 and 14 and 15 the C6's transmit low-pass, as a guess. On the C6 neither moves anything measured:
-
-- Looped back (measured, `prog/txfilter.c`, `codes=100,0,3f`, `regs=12` and `regs=14`, the PHY's 0x1B and 0x09 in them):
-  the tone's line at +2.5 to +39.4 MHz the same within 0.2 dB at every code; the line itself falls only 1.7 dB to +19.5 MHz
-  and 6.8 dB to +39.4.
-- On the air (measured, `prog/txfilter.c` with `rhythm=20`, the nRF52840's `watch=12` on the 802.15.4 channel the tone lies in,
-  `user/thread/tools/watch-spectrum.py`): the tone switched at 10 Hz stood 33, 21, 27 and 28 dB over the rates beside it
-  at +3, +18, +28 and +38 MHz, and the code switched at 10 Hz under a tone left on, 0x1B against 0x3F or against 0,
-  at -22 to +4 dB, its line's amplitude 4 % of the tone's at most; the pair 14 and 15 at +28 MHz, -4 dB.
-  So the transmitter has no low-pass of note within 40 MHz in the loopback's path, and these registers are not it.
-- The tones at +37.5 and +39.4 MHz of these runs put the DAC's image at 2395 to 2397 MHz, below the band,
-  at about the leak's level, before `drv_phy_tone_fits` took steps of 512 and up out.
+12 and 13 and 14 and 15 the C6's transmit low-pass, as a guess.
+On the C6 neither pair moved anything, at codes 0, 0x1B and 0x3F
+(measured with 470f67b7's `prog/txfilter.c`, since removed):
+looped back, the tone's line from +2.5 to +39.4 MHz stood the same within 0.2 dB, falling only 7 dB by +39.4 at any code;
+on the air, the code switched at 10 Hz under a tone left on gave the nRF52840's `watch=` no line at 10 Hz,
+where the tone switched so gave one 21 to 33 dB over the rates beside it.
+So the transmitter has no low-pass of note within 40 MHz in the loopback's path, and these registers are not it.
+Tones at +37.5 and +39.4 MHz of these runs put the DAC's image at 2395 to 2397 MHz, below the band,
+at about the leak's level, before `drv_phy_tone_fits` took steps of 512 and up out.
 
 ### BBPLL
 
