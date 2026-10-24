@@ -75,7 +75,16 @@ ifneq ($(WIFI_BRIDGE_VARIANT),)
 $(error WIFI_BT=1 and WIFI_BRIDGE=1 together: the image has room for one of the two)
 endif
 endif
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(WIFI_BRIDGE_VARIANT)
+# The board's DMA controller and router, whose channels the kernel lends; see DESIGN.md, "DMA" and "Routes".
+# DMA=0 or ROUTES=0 builds a kernel that lends none of the one or the other, leaving their code out,
+# in a directory of its own, as a budget does.
+DMA ?= 1
+ROUTES ?= 1
+ifneq ($(filter-out 0 1,$(DMA) $(ROUTES)),)
+$(error DMA=$(DMA) ROUTES=$(ROUTES); each is 1, the board's channels lent, or 0)
+endif
+LEND_VARIANT := $(if $(filter 0,$(DMA)),-nodma)$(if $(filter 0,$(ROUTES)),-noroutes)
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(WIFI_BRIDGE_VARIANT)$(LEND_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -105,7 +114,8 @@ CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-com
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
              -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DSELFCHECK=$(SELFCHECK) \
-             $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(WIFI_BRIDGE)),-DWIFI_BRIDGE=1)
+             $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(WIFI_BRIDGE)),-DWIFI_BRIDGE=1) \
+             $(if $(filter 0,$(DMA)),-DDMA_OFF) $(if $(filter 0,$(ROUTES)),-DROUTE_OFF)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES) $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 

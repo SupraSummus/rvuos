@@ -182,9 +182,9 @@ static void clear_node(struct cap *n)
     } else if (n->type == CAP_FRAME) {
         /* A region of a process, or an end of a Route or a Dma: the holder says which. */
         uint8_t holder = ((struct obj_header *)p2v(cap_holder(n)))->type;
-        if (holder == CAP_ROUTE) {
+        if (ROUTE_LENT && holder == CAP_ROUTE) {
             route_drop(n);
-        } else if (holder == CAP_DMA) {
+        } else if (DMA_LENT && holder == CAP_DMA) {
             dma_drop(n);
         } else {
             process_drop(n);

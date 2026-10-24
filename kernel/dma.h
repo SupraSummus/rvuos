@@ -9,7 +9,8 @@
  * the grain of a transfer, DMA_GRAIN, and its longest, DMA_MOST, and gives the dmac_ functions below;
  * with DMA_FAKE dma.c gives a controller of its own, which moves nothing,
  * as QEMU's boards and the host have, so that the operations run there as on silicon.
- * A board with neither lends no channel.
+ * A board with neither lends no channel, and nor does a kernel built with DMA_OFF, make DMA=0, on any board:
+ * DMA_LENT then leaves the code for DMA out.
  */
 
 #include <stdbool.h>
@@ -18,6 +19,13 @@
 #include "kernel.h"
 #include "paddr.h"
 
+#ifdef DMA_OFF
+#undef DMA_FIRST
+#undef DMA_CHANNELS
+#undef DMA_GRAIN
+#undef DMA_MOST
+#undef DMA_FAKE
+#endif
 #ifndef DMA_CHANNELS
 #define DMA_FIRST    0u
 #define DMA_CHANNELS 0u
@@ -27,6 +35,11 @@
 #ifndef DMA_FAKE
 #define DMA_FAKE 0
 #endif
+/*
+ * Whether the kernel lends any channel: where it lends none, no DmaLine or Dma ever exists,
+ * so the code that acts on one is dead, and the compiler leaves it out on this constant.
+ */
+#define DMA_LENT (DMA_CHANNELS != 0)
 _Static_assert(DMA_FIRST + DMA_CHANNELS <= UINT16_MAX, "a DmaLine capability names its range in two bytes each");
 _Static_assert(DMA_GRAIN != 0 && (DMA_GRAIN & (DMA_GRAIN - 1)) == 0 && DMA_MOST % DMA_GRAIN == 0,
                "a grain is a power of two, and the longest transfer a whole number of them");

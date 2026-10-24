@@ -1151,11 +1151,15 @@ bool sched_forget(struct obj_header *o, bool preempt)
         break;
     case CAP_ROUTE:
         /* Its ends were cleared with the object's nodes, which disarmed it; the channel is free again. */
-        route_forget((struct route *)o);
+        if (ROUTE_LENT) {
+            route_forget((struct route *)o);
+        }
         break;
     case CAP_DMA:
         /* Its ends were cleared with the object's nodes, which halted it; the channel is free again. */
-        dma_forget((struct dma *)o);
+        if (DMA_LENT) {
+            dma_forget((struct dma *)o);
+        }
         break;
     case CAP_THREAD: {
         struct thread *t = (struct thread *)o;

@@ -775,6 +775,9 @@ static int op_route_line(struct thread *t, uint32_t slot, const struct cap *cap,
 {
     uint32_t channel = range_first(cap);
 
+    if (!ROUTE_LENT) {
+        return KERR_WRONG_TYPE;
+    }
     switch (op) {
     case OP_ROUTE_CARVE:
         return carve_range(t, slot, cap, arg);
@@ -827,6 +830,9 @@ static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const 
 {
     struct route *r = (struct route *)cap_object(cap);
 
+    if (!ROUTE_LENT) {
+        return KERR_WRONG_TYPE;
+    }
     switch (op) {
     case OP_ROUTE_END: {
         uint32_t end = arg[1];
@@ -877,6 +883,9 @@ static int op_dma_line(struct thread *t, uint32_t slot, const struct cap *cap,
 {
     uint32_t channel = range_first(cap);
 
+    if (!DMA_LENT) {
+        return KERR_WRONG_TYPE;
+    }
     switch (op) {
     case OP_DMA_CARVE:
         return carve_range(t, slot, cap, arg);
@@ -929,6 +938,9 @@ static int op_dma(struct thread *t, const struct cap *cap, uint32_t op, const ui
 {
     struct dma *d = (struct dma *)cap_object(cap);
 
+    if (!DMA_LENT) {
+        return KERR_WRONG_TYPE;
+    }
     switch (op) {
     case OP_DMA_END: {
         uint32_t end = arg[1];
@@ -1232,7 +1244,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         arg[2] = d->channel;
         arg[3] = (d->ends[DMA_SOURCE].type != CAP_NONE ? 1u << DMA_SOURCE : 0) |
                  (d->ends[DMA_SINK].type != CAP_NONE ? 1u << DMA_SINK : 0);
-        arg[4] = dma_busy(d);
+        arg[4] = DMA_LENT && dma_busy(d);
         break;
     }
     case CAP_CLOCK:

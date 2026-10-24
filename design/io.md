@@ -110,6 +110,8 @@ and armed and connected are one state, which the self-check reads back from the 
 **What stands in for a router.**
 QEMU's boards and the host have four channels of `kernel/route.c` that wire nothing and take any word of a frame for an end,
 so the fuzzer and the seeds run the operations as on silicon; decision 37 says what the other chips would take.
+Where the kernel lends no channel, on a board without a router or built with `ROUTES=0`, no `RouteLine` or `Route` can exist,
+so `ROUTE_LENT`, a constant, has the compiler leave out the code that acts on one, and the build the board's router, its `route.c`.
 
 ## DMA
 
@@ -159,6 +161,8 @@ and run from a start until a halt,
 so the fuzzer and the seeds run the operations as on silicon, a start meeting a channel that still runs among them.
 The ESP32-C6 and the ESP32-C5 lend their GDMA's transmit channels and RP2350 its DMA's sixteen;
 the nRF52840 has no controller apart from its devices, whose EasyDMA lies in each device's own registers; see decision 42.
+Where the kernel lends no channel, on such a board or built with `DMA=0`, no `DmaLine` or `Dma` can exist,
+so `DMA_LENT` has the compiler leave out the code that acts on one, and the build the board's controller, its `dma.c`.
 
 ## The kernel log
 

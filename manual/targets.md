@@ -562,6 +562,10 @@ and `make CORES=2 run` boots it with `-smp 2`;
 `make BOARD=mps2-an521 CORES=2` builds it for that board's two cores, under `build/mps2-an521-smp2/`,
 and `make BOARD=rp2350 CORES=2` for RP2350's, under `build/rp2350-smp2/`, or `build/rp2350-arm-smp2/` with `ARCH=arm`.
 No other board takes `CORES`.
+`DMA=0` builds a kernel that lends no channel of the board's DMA controller, and `ROUTES=0` none of its router,
+under `-nodma` and `-noroutes`: `BOOT_CAP_DMA` or `BOOT_CAP_ROUTES` is then empty, as on a board without one,
+and the kernel leaves their code out, about 2 KiB of it for DMA on a board with a controller and 1.4 KiB for routes on the nRF52840;
+a kernel leaves it out on its own where the board has no controller or no router.
 
 On the ESP32-C6, connected over USB:
 

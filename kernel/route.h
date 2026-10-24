@@ -8,7 +8,8 @@
  * A board with a router says in board.h which of its channels the kernel lends, ROUTE_CHANNELS from ROUTE_FIRST,
  * and gives the router_ functions below; with ROUTER_FAKE route.c gives a router of its own, which connects nothing,
  * as QEMU's boards and the host have, so that the operations run there as on silicon.
- * A board with neither lends no channel.
+ * A board with neither lends no channel, and nor does a kernel built with ROUTE_OFF, make ROUTES=0, on any board:
+ * ROUTE_LENT then leaves the code for routes out.
  */
 
 #include <stdbool.h>
@@ -17,6 +18,11 @@
 #include "kernel.h"
 #include "paddr.h"
 
+#ifdef ROUTE_OFF
+#undef ROUTE_FIRST
+#undef ROUTE_CHANNELS
+#undef ROUTER_FAKE
+#endif
 #ifndef ROUTE_CHANNELS
 #define ROUTE_FIRST    0u
 #define ROUTE_CHANNELS 0u
@@ -24,6 +30,11 @@
 #ifndef ROUTER_FAKE
 #define ROUTER_FAKE 0
 #endif
+/*
+ * Whether the kernel lends any channel: where it lends none, no RouteLine or Route ever exists,
+ * so the code that acts on one is dead, and the compiler leaves it out on this constant.
+ */
+#define ROUTE_LENT (ROUTE_CHANNELS != 0)
 _Static_assert(ROUTE_FIRST + ROUTE_CHANNELS <= UINT16_MAX, "a RouteLine capability names its range in two bytes each");
 
 struct cap;

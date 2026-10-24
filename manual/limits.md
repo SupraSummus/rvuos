@@ -21,8 +21,8 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | an object's size | section 5.5 | `OP_POOL_INFO` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |
-| a router's channels | 19 on the nRF52840, 4 that wire nothing on QEMU's boards, none elsewhere | `OP_CAP_INFO` on `BOOT_CAP_ROUTES` |
-| a DMA controller's channels | 3 on the ESP32-C6 and the ESP32-C5, 16 on RP2350, 4 that move nothing on QEMU's boards, none on the nRF52840 | `OP_CAP_INFO` on `BOOT_CAP_DMA` |
+| a router's channels | 19 on the nRF52840, 4 that wire nothing on QEMU's boards, none elsewhere or with `ROUTES=0` | `OP_CAP_INFO` on `BOOT_CAP_ROUTES` |
+| a DMA controller's channels | 3 on the ESP32-C6 and the ESP32-C5, 16 on RP2350, 4 that move nothing on QEMU's boards, none on the nRF52840 or with `DMA=0` | `OP_CAP_INFO` on `BOOT_CAP_DMA` |
 | a DMA transfer | whole words, and at most 32736 bytes on the ESP32-C6 and the ESP32-C5, the frame's length on RP2350, or 4096 on QEMU's boards | `DMA_GRAIN` and `DMA_MOST` in the kernel's `board.h`; `OP_DMA_START` |
 | units of time | 64 of each core | `TIME_UNITS` |
 | cores | 1, or 2 on QEMU `virt`, mps2-an521 and RP2350 with `CORES=2` | Makefile; `OP_CAP_INFO` on `BOOT_CAP_TIME`, its count over `TIME_UNITS` |

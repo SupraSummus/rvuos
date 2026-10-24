@@ -1,8 +1,10 @@
 # The kernel, checked at its link, and the images, each the kernel with a root task of user/build.mk's.
 
 # Without the self-check its source is left out, not left to the linker,
-# which keeps a dropped function's lines at address 0, where mps2-an385's code starts and tools/loop-bounds.py reads them.
-KERNEL_SRC_C := $(filter-out $(if $(filter 0,$(SELFCHECK)),kernel/selfcheck.c), \
+# which keeps a dropped function's lines at address 0, where mps2-an385's code starts and tools/loop-bounds.py reads them;
+# so is a board's DMA controller's, its dma.c, with DMA=0, and its router's, its route.c, with ROUTES=0.
+KERNEL_SRC_C := $(filter-out $(if $(filter 0,$(SELFCHECK)),kernel/selfcheck.c) \
+                  $(if $(filter 0,$(DMA)),kernel/board/%/dma.c) $(if $(filter 0,$(ROUTES)),kernel/board/%/route.c), \
                   $(wildcard kernel/*.c kernel/arch/$(ARCH)/*.c kernel/board/$(BOARD)/*.c \
                              kernel/board/$(BOARD)/$(ARCH)/*.c $(addsuffix /*.c,$(call FAMILY_DIRS,kernel))))
 KERNEL_SRC_S := $(wildcard kernel/*.S kernel/arch/$(ARCH)/*.S kernel/board/$(BOARD)/*.S)
