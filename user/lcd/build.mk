@@ -5,7 +5,7 @@
 # for a person to hold beside the board. Only lcd-sim writes images, so only it links libpng.
 LCD_HOST   := build/host/lcd
 LCD_SHARED := $(LCD_HOST)/app.o $(LCD_HOST)/pattern.o $(LCD_HOST)/stress.o $(LCD_HOST)/orient.o $(LCD_HOST)/font.o \
-              $(LCD_HOST)/anim.o $(LCD_HOST)/noise.o $(LCD_HOST)/st7789.o $(LCD_HOST)/sim/panel.o
+              $(LCD_HOST)/anim.o $(LCD_HOST)/noise.o $(LCD_HOST)/veins.o $(LCD_HOST)/st7789.o $(LCD_HOST)/sim/panel.o
 
 $(LCD_HOST)/%.o: user/lcd/%.c
 	@mkdir -p $(dir $@)

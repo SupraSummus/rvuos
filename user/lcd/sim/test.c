@@ -3,7 +3,8 @@
  * app.c against the model of the board's LCD, which must meet no error and show the test pattern where pattern.h says,
  * the frame on the glass's second pixel from each edge and the bands' colours inside it,
  * and the model itself, which must refuse what the controller would not take, so that its silence means something,
- * and must hide what the glass's round corners hide, and show a picture torn only when it is not drawn in sync.
+ * and must hide what the glass's round corners hide, and show a picture torn only when it is not drawn in sync;
+ * and the veins scene, whose light must stay even, refresh to refresh, as veins.h says.
  * A pixel the corners hide is held to what the program drew in the controller's memory instead.
  * The model's own facts are the board's or the datasheet's, see panel.c; this holds the program to them, not them to the board.
  */
@@ -115,6 +116,54 @@ static uint32_t tears(uint32_t mhz, uint32_t first, uint32_t last)
     panel_on_time(0);
     panel_bus_mhz(40);
     return torn;
+}
+
+/*
+ * The veins scene's light: the glass's mean, in the sum of its three colours, at each refresh from LIGHT_FROM on,
+ * counted from the scene's start, when the first network has grown out of the point it starts in,
+ * and the most it moved from one refresh to the next.
+ */
+#define LIGHT_PICTURES 150u
+#define LIGHT_FROM     75u
+
+static uint64_t light_start, light_refreshes;
+static uint32_t light_last, light_least, light_most, light_moved;
+
+static void watch_light(uint64_t now_ns)
+{
+    (void)now_ns;
+    if (panel_refreshes() == light_refreshes) {
+        return;
+    }
+    light_refreshes = panel_refreshes() - light_start;
+    if (light_refreshes < LIGHT_FROM) {
+        return;
+    }
+    uint64_t sum = 0;
+    for (uint32_t y = 0; y < GLASS_H; y++) {
+        for (uint32_t x = 0; x < GLASS_W; x++) {
+            uint32_t c = panel_shown(x, y);
+            sum += (c >> 16) + (c >> 8 & 0xffu) + (c & 0xffu);
+        }
+    }
+    uint32_t light = (uint32_t)(sum / (GLASS_W * GLASS_H));
+    if (light_refreshes > LIGHT_FROM) {
+        uint32_t moved = light > light_last ? light - light_last : light_last - light;
+        light_moved = moved > light_moved ? moved : light_moved;
+    }
+    light_least = light < light_least ? light : light_least;
+    light_most = light > light_most ? light : light_most;
+    light_last = light;
+}
+
+/* The host's random words for the veins scene, Marsaglia's xorshift32, as the simulator's. */
+static uint32_t xorshift(void)
+{
+    static uint32_t x = 2463534242u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return x;
 }
 
 static void expect_errors(int some, const char *what)
@@ -262,6 +311,31 @@ int main(void)
                    bad[i].first, bad[i].last, bad[i].mhz);
             failures++;
         }
+    }
+
+    /*
+     * The veins scene, at the bus's 80 MHz: no error, and once its network has grown its light stays even, nothing flashing,
+     * its mean neither dark nor burnt out and never moving by more than a twentieth from one refresh to the next.
+     */
+    static _Alignas(4) uint8_t veins_memory[VEINS_MEMORY];
+    struct app_options veins = APP_OPTIONS_DEFAULT;
+    veins.random = xorshift;
+    veins.memory = veins_memory;
+    veins.pictures = LIGHT_PICTURES;
+    panel_bus_mhz(80);
+    lcd_bus_init();
+    light_least = UINT32_MAX;
+    light_start = panel_refreshes();
+    panel_on_time(watch_light);
+    app_run(&lcd, APP_VEINS, &veins);
+    panel_on_time(0);
+    panel_bus_mhz(40);
+    expect_errors(0, "the veins scene");
+    printf("lcd-test: the veins scene's light from refresh %u to %llu: %u to %u, moving by %u at most\n", LIGHT_FROM,
+           (unsigned long long)light_refreshes, light_least, light_most, light_moved);
+    if (light_refreshes < LIGHT_FROM + 30u || light_least < 10u || light_most > 200u || light_moved * 20u > light_least) {
+        printf("lcd-test: the veins scene's light is not even: FAIL\n");
+        failures++;
     }
 
     wake_without(0);

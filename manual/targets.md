@@ -264,6 +264,8 @@ Without the GDMA it sends only what the CPU writes into its 64-byte buffer, a tr
 and renders on the host, against a model of the LCD, what it shows: `make lcd-sim`.
 `make BOARD=esp32c5 lcd LCD_CONFIG="scene=stress mhz=80"` runs it on the board, its scene and its bus's clock as named;
 `scene=noise` draws snow from the random number generator, 600 pictures, or `pictures=` as many, `pictures=0` without end.
+`scene=veins` grows a network of glowing threads from it, a slime mould's, as many pictures,
+in 256 KiB of the free RAM and the further block below it, which take the region slots of the input and the IO MUX once the pins are set up.
 GPIO_EXT, with its sigma-delta modulator, lies in the GPIO's own page, on the IO MUX's clock, which the kernel leaves as the chip starts,
 so a program that holds the GPIO can drive a pin at a density of its own; `user/lcd/` dims the backlight so.
 The flash's pins are in the IO MUX, so a program that holds it can cut the flash off, the root task's code with it,

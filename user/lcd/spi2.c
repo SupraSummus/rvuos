@@ -3,6 +3,8 @@
  *
  * SPI2 sends what the CPU writes into its 64-byte buffer, a transfer at a time, with no DMA:
  * the GDMA, which would reach all of RAM, is not the program's, see the kernel's board.h.
+ * A transfer of data goes on while the program does, and whatever next touches SPI2, its buffer or the pins
+ * that frame a command waits for it first, so that a program can work out its next bytes while the last go out.
  * The select is a plain pin, held low across a command and all its data,
  * so the data may span as many transfers as it takes.
  * The clock and data reach SPI2 through the GPIO matrix, since the IO MUX's own SPI pins are the other way round.
@@ -99,7 +101,13 @@ static void settle(uint32_t bit, const char *what)
     rv_halt(BOOT_CAP_HALT, 1);
 }
 
-/* Send what the buffer holds, n bytes of it, at most SPI_BUF_BYTES. */
+/* Wait until the transfer under way, if one is, is done. */
+static void idle(void)
+{
+    settle(SPI_CMD_USR, "SPI2 sends");
+}
+
+/* Start sending what the buffer holds, n bytes of it, at most SPI_BUF_BYTES, with no transfer under way. */
 static void send(uint32_t n)
 {
     REG(SPI_DMA_CONF) = SPI_BUF_AFIFO_RST;
@@ -107,7 +115,6 @@ static void send(uint32_t n)
     REG(SPI_CMD) = SPI_CMD_UPDATE;
     settle(SPI_CMD_UPDATE, "SPI2 takes its registers");
     REG(SPI_CMD) = SPI_CMD_USR;
-    settle(SPI_CMD_USR, "SPI2 sends");
 }
 
 /*
@@ -165,10 +172,12 @@ void lcd_bus_init(void)
 
 void lcd_bus_command(uint8_t command)
 {
+    idle();
     pin(PIN_CS, 0);
     pin(PIN_DC, 0);
     REG(SPI_W(0)) = command;
     send(1);
+    idle();
     pin(PIN_DC, 1);
 }
 
@@ -176,6 +185,7 @@ void lcd_bus_data(const uint8_t *bytes, uint32_t n)
 {
     while (n > 0) {
         uint32_t chunk = n < SPI_BUF_BYTES ? n : SPI_BUF_BYTES;
+        idle();
         load(bytes, chunk);
         send(chunk);
         bytes += chunk;
@@ -185,11 +195,13 @@ void lcd_bus_data(const uint8_t *bytes, uint32_t n)
 
 void lcd_bus_end(void)
 {
+    idle();
     pin(PIN_CS, 1);
 }
 
 uint32_t lcd_bus_read(void)
 {
+    idle();
     uint32_t clock = REG(SPI_CLOCK);
     REG(GPIO_ENABLE_W1TC) = 1u << PIN_MOSI;
     pin(PIN_DC, 1);
@@ -231,6 +243,7 @@ void lcd_bus_backlight(uint32_t level)
 
 void spi2_configure(uint32_t mhz, uint32_t drive)
 {
+    idle();
     for (uint32_t i = 0; i < sizeof(outputs); i++) {
         REG(IO_MUX_PIN(outputs[i])) = IO_MUX_MATRIX(drive & 3u) | (outputs[i] == PIN_MOSI ? IO_MUX_INPUT : 0);
     }

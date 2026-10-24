@@ -22,6 +22,8 @@ void lcd_bus_command(uint8_t command);
 
 /*
  * The command's data, n bytes with DC high, in order.
+ * It may return while the last of them are still going out, the buffer free again,
+ * so that the caller can work out what comes next meanwhile; the next call to the bus waits for them.
  * A buffer aligned to four bytes goes out a word at a time, which spi2.c packs fastest.
  */
 void lcd_bus_data(const uint8_t *bytes, uint32_t n);

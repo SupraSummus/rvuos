@@ -8,8 +8,9 @@
 #include "pattern.h"
 #include "st7789.h"
 #include "stress.h"
+#include "veins.h"
 
-static const char *const names[APP_SCENES] = { "pattern", "stress", "probe", "orient", "timing", "anim", "noise" };
+static const char *const names[APP_SCENES] = { "pattern", "stress", "probe", "orient", "timing", "anim", "noise", "veins" };
 
 int app_scene(const char *name, uint32_t n)
 {
@@ -42,5 +43,7 @@ void app_run(struct st7789 *lcd, int scene, const struct app_options *options)
         anim_draw(lcd, options->clock, options->report);
     } else if (scene == APP_NOISE && options->random != 0) {
         noise_draw(lcd, options->random, options->pictures);
+    } else if (scene == APP_VEINS && options->random != 0 && options->memory != 0) {
+        veins_draw(lcd, options->random, options->memory, options->pictures);
     }
 }

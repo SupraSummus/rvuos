@@ -13,10 +13,15 @@
  * scene= names app.c's scene, pattern unless given, mhz= the bus's clock, 40 or 80, and drive= its pins' drive, 0 to 3,
  * see spi2.h, madctl= the orient scene's MADCTL in decimal, such as madctl=96, each of orient.h's in turn unless given,
  * backlight= its level, 0 to 255, see bus.h, 255 unless given,
- * and pictures= how many the noise scene draws, see noise.h, 0 for no end, which never halts.
+ * and pictures= how many the noise and veins scenes draw, see noise.h and veins.h, 0 for no end, which never halts.
  * The anim scene's report, see anim.h, follows the drawing on the console.
- * The noise scene writes the random number generator's RNG_CFG before it draws and after, its top byte the ring oscillator's samples.
+ * The noise scene writes the random number generator's RNG_CFG before it draws and after, its top byte the ring oscillator's samples,
+ * and the veins scene how many pictures a second it drew.
  * What it does not find it leaves at the default.
+ *
+ * The veins scene's memory is the boot's free RAM and the further block below it, 256 KiB side by side, as two frames;
+ * the root task holds no region slot for them, so once the configuration is read and the pins are set up
+ * they take the slots of the input and the IO MUX, which nothing reads after.
  *
  * The probe scene leaves the screen black and takes lines from the console, for user/lcd/tools/probe.py:
  * "x y" lights the panel's pixel at x, y and puts out the one lit before, "off" puts it out,
@@ -50,6 +55,8 @@ enum {
     SLOT_LINE,                  /* the timer line, carved */
     SLOT_TIMER,                 /* the Irq on it */
     SLOT_CONSOLE,               /* the Irq on the console's line, for the probe */
+    SLOT_LOW_RAM,               /* the further block of RAM as a frame, for the veins scene */
+    SLOT_HIGH_RAM,              /* the free RAM as a frame, right above it */
 };
 
 /* Region slots of the root task's process past its code and data. */
@@ -59,6 +66,9 @@ enum {
 #define REGION_SPI2    5
 #define REGION_INPUT   6
 #define REGION_RNG     7
+/* The veins scene's memory, in the slots of the IO MUX and the input, once their work is done. */
+#define REGION_LOW_RAM  REGION_IO_MUX
+#define REGION_HIGH_RAM REGION_INPUT
 
 #define BIT_TIMER   1u
 #define BIT_CONSOLE 2u
@@ -364,6 +374,41 @@ static void probe_run(const struct st7789 *lcd)
     }
 }
 
+/*
+ * The veins scene's memory: the further block of RAM and the free RAM, as frames, in place of the IO MUX and the input,
+ * which must lie side by side and hold VEINS_MEMORY.
+ */
+static void *veins_memory(void)
+{
+    uint32_t low, low_size, high, high_size, made;
+    expect("the further block", rv_untyped_info(BOOT_CAP_MORE_RAM, &low, &low_size, &made));
+    expect("the free RAM", rv_untyped_info(BOOT_CAP_FREE_RAM, &high, &high_size, &made));
+    if (high != low + low_size || low_size + high_size < VEINS_MEMORY) {
+        expect("RAM for the veins scene, side by side", KERR_NO_MEMORY);
+    }
+    expect("unmap the IO MUX", rv_process_uninstall(BOOT_CAP_PROCESS, REGION_IO_MUX));
+    expect("unmap the input", rv_process_uninstall(BOOT_CAP_PROCESS, REGION_INPUT));
+    expect("the further block as a frame", rv_retype(BOOT_CAP_MORE_RAM, CAP_FRAME, SLOT_LOW_RAM, &low));
+    expect("the free RAM as a frame", rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, SLOT_HIGH_RAM, &high));
+    expect("map the further block", rv_process_install(BOOT_CAP_PROCESS, REGION_LOW_RAM, SLOT_LOW_RAM, RIGHT_R | RIGHT_W));
+    expect("map the free RAM", rv_process_install(BOOT_CAP_PROCESS, REGION_HIGH_RAM, SLOT_HIGH_RAM, RIGHT_R | RIGHT_W));
+    return (void *)(uintptr_t)low;
+}
+
+/* A rate, whole and in hundredths, of count in cycles at hz a second, in 32 bits, which the program divides in. */
+static void put_rate(uint32_t count, uint64_t cycles, uint32_t hz)
+{
+    uint32_t shift = 0;
+    while (cycles >> shift > 0xffffffffu) { /* bounded: 32 bits */
+        shift++;
+    }
+    uint32_t per = (uint32_t)(cycles >> shift) / count, of = hz >> shift;
+    put_dec(of / per);
+    puts(".");
+    put_dec((of % per) * 100u / per / 10u);
+    put_dec((of % per) * 100u / per % 10u);
+}
+
 /* The anim scene's report: each phase's rate, put whole and in hundredths, as a phase's cycles fit in 32 bits. */
 static void anim_print(const struct anim_report *report)
 {
@@ -457,6 +502,9 @@ int main(void)
     }
     lcd_bus_init();
     spi2_configure(mhz, drive);
+    if (scene == APP_VEINS) {
+        options.memory = veins_memory();
+    }
     uint64_t t0 = cycles();
     struct st7789 lcd;
     app_run(&lcd, scene, &options);
@@ -473,6 +521,12 @@ int main(void)
         anim_print(&report);
     } else if (scene == APP_NOISE) {
         rng_print("after");
+    } else if (scene == APP_VEINS) {
+        puts("lcd: veins: ");
+        put_dec(options.pictures);
+        puts(" pictures, ");
+        put_rate(options.pictures, t1 - t0, (uint32_t)clock_hz());
+        puts(" a second\n");
     }
     rv_halt(BOOT_CAP_HALT, 0);
     return 0;
