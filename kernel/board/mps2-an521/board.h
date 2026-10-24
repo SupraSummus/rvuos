@@ -81,6 +81,10 @@
 #define BOOT_DEVICES 0
 #define DEVICE_RANGE_LIST
 
+/* No further blocks of RAM beside the free RAM, which the ESP32-C6 has; see boot.c. */
+#define BOOT_RAM_BLOCKS 0
+#define RAM_BLOCK_LIST
+
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * The NVIC has 124 lines here, the SSE-200's 32 and the board's 92 after them;

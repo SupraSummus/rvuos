@@ -23,6 +23,7 @@ The kernel:
    frames for the UART's registers,
    to the kernel's log
    and to each device the board lists, on the ESP32-C6 a window onto flash among them,
+   an `Untyped` for each further block of RAM the board lists,
    the machine's counter as a `Clock`,
    every line of the interrupt controller with the log's line before them,
    and every unit of the processor's time, with its own thread earning them all,
@@ -37,17 +38,20 @@ and can never become a pool:
 it is a frame, and no Untyped covers it,
 because the kernel writes objects into a pool,
 which on a device would drive its registers from machine mode.
-The two Untypeds the root task starts with cover RAM and nothing else.
+The Untypeds the root task starts with cover RAM and nothing else.
 Where a board places the root task's code and input in flash, outside RAM, as the ESP32-C6 does,
 their frames are roots of their own, as a device's are, and the root task's memory holds its data and the boot pool alone.
 
 Every range the root task is granted is a block,
-so a board lays RAM out in blocks and what lies in none of them stays unused.
+so a board lays RAM out in blocks and what lies in none of them stays unused,
+or lists it as further blocks of free RAM, which the root task is granted as Untypeds from `BOOT_CAP_RAM_BLOCKS` up;
+decision 40.
 
 The slots the root task finds filled are listed in `include/rvuos/abi.h`
 as the `BOOT_CAP_*` constants.
 Slot zero is left empty so that an uninitialised index fails.
 The devices' frames come last, from `BOOT_CAP_DEVICES` up, as many as the board lists, `BOOT_DEVICES`,
+and then its further blocks of RAM, from `BOOT_CAP_RAM_BLOCKS` up, `BOOT_RAM_BLOCKS` of them,
 so `BOOT_CAP_COUNT`, where the root task's own slots start, is the board's,
 and its table, `ROOT_TABLE_SLOTS`, has 46 slots past them on every board.
 
@@ -141,6 +145,14 @@ the ESP32-C6's modem and the nRF52840's radio are those a board lists, each for 
 and the ESP32-C6's HP_SYSTEM, which gives the modem's dump engine a bank of SRAM; open decision 13.
 Nor does it list the devices the kernel drives itself, the timer and the watchdog:
 a program reaches those through the clock's operations, which every board can answer; see "The watchdog".
+
+**Blocks of RAM.**
+A board lists, in `RAM_BLOCK_LIST`, the blocks of RAM it sets aside for the root task beside the free RAM,
+and the boot grants each as an Untyped with all rights, from `BOOT_CAP_RAM_BLOCKS` up in the list's order,
+once it has checked that each lies in RAM apart from the kernel, its log, the root task's memory, the free RAM
+and the blocks before it; a board whose blocks do not lie so does not boot.
+The ESP32-C6 lists the quarter of its RAM below the free RAM, 128 KiB from `0x40820000`;
+no other board lists any, decision 40.
 
 **Routers.**
 A board with a router lends its channels from `ROUTE_FIRST`, `ROUTE_CHANNELS` of them, see "Routes",

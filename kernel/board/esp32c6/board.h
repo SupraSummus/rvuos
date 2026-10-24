@@ -11,7 +11,7 @@
  * The kernel owns [RAM_BASE, KLOG_BASE) and its log above it.
  * The root task's memory follows, one block holding its data region and the boot pool its kernel objects live in;
  * its code and input lie in flash, see FLASH_IMAGE_BASE.
- * The upper half of RAM is handed to the root task as free RAM.
+ * The upper half of RAM is handed to the root task as free RAM, and the quarter below it as a further block.
  * Each is a block aligned to its own size; what lies in none of them is left unused.
  */
 #define RAM_BASE       U32(0x40800000)
@@ -24,6 +24,9 @@
 #define BOOT_POOL_BASE U32(0x40818000)
 #define FREE_RAM_BASE  U32(0x40840000)
 #define FREE_RAM_SIZE  U32(0x00040000)
+/* The further block of RAM, which the boot grants as an Untyped from BOOT_CAP_RAM_BLOCKS up; see boot.c. */
+#define BOOT_RAM_BLOCKS 1
+#define RAM_BLOCK_LIST { U32(0x40820000), U32(0x00020000), RIGHT_ALL },
 
 /*
  * The flash, 4 MiB on the XIAO ESP32-C6, whose first MiB the MMU shows page for page from FLASH_IMAGE_BASE.

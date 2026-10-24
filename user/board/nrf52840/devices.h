@@ -7,6 +7,7 @@
  * A frame maps at its own address, so a program names a register by the device's base.
  */
 #define BOOT_DEVICES 5
+#define BOOT_RAM_BLOCKS 0 /* no further blocks of RAM, from BOOT_CAP_RAM_BLOCKS up */
 #define BOOT_CAP_GPIO   (BOOT_CAP_DEVICES + 0) /* both ports, P0 and P1 */
 #define BOOT_CAP_RADIO  (BOOT_CAP_DEVICES + 1) /* the 2.4 GHz radio, a bus master */
 #define BOOT_CAP_TIMER2 (BOOT_CAP_DEVICES + 2) /* a TIMER the kernel leaves free */

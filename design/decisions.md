@@ -933,3 +933,16 @@ until the maintainer decides otherwise.
     - **The earliest deadline without a walk** of the run queue, `TIME_UNITS` places at most.
     - **Lending across cores**, decision 27, and a borrower's lenders kept in the order of their deadlines.
     - **Fuel**, a process's energy beside the power its units bound.
+
+40. **Free RAM in more than one block.**
+    Decided: beside `BOOT_CAP_FREE_RAM` the boot grants an `Untyped` over each further block of RAM the board lists,
+    `RAM_BLOCK_LIST` in its `board.h`, from `BOOT_CAP_RAM_BLOCKS` up, after the devices; see "Boards".
+    Every grant is one NAPOT block, so RAM that the kernel and the root task's memory leave in pieces
+    could reach a program only as one block of it, the largest:
+    on the ESP32-C6, once the root task's code moved to flash, the free RAM's half and a quarter below it.
+    The board says which blocks, as it says which devices, and the boot checks that each lies in RAM
+    apart from the kernel, its log, the root task's memory, the free RAM and the blocks before it.
+    QEMU lists none, so its table, the seeds and the corpus stay as they were, as with the devices, decision 25.
+    A block is a root of its own, as the free RAM is, so no operation joins it to another:
+    `lib/mem.c` joins a block's halves back into the block, each block on its own.
+    Before, the free RAM was one block, and the rest lay unused.

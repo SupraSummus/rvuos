@@ -123,6 +123,10 @@
     { U32(0x50300000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
     { U32(0x50400000), U32(0x00004000), RIGHT_R | RIGHT_W },
 
+/* No further blocks of RAM beside the free RAM, which the ESP32-C6 has; see boot.c. */
+#define BOOT_RAM_BLOCKS 0
+#define RAM_BLOCK_LIST
+
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * A line is a system IRQ, numbered as in the datasheet's table of them; the chip has 52,

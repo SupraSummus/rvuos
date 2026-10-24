@@ -793,8 +793,14 @@
  * BOOT_DEVICES comes from the kernel's board.h, or a program's devices.h, which names each slot.
  */
 #define BOOT_CAP_DEVICES   21
+/*
+ * Untypeds over the further blocks of RAM the board sets aside for the root task, beside BOOT_CAP_FREE_RAM's,
+ * BOOT_RAM_BLOCKS of them, from this slot up in the board's order; QEMU's lists none.
+ * BOOT_RAM_BLOCKS comes from the kernel's board.h, or a program's devices.h, as BOOT_DEVICES does.
+ */
+#define BOOT_CAP_RAM_BLOCKS (BOOT_CAP_DEVICES + BOOT_DEVICES)
 /* The root task's own slots start here; on QEMU it is 21. */
-#define BOOT_CAP_COUNT     (BOOT_CAP_DEVICES + BOOT_DEVICES)
+#define BOOT_CAP_COUNT     (BOOT_CAP_RAM_BLOCKS + BOOT_RAM_BLOCKS)
 
 /*
  * The kernel's log.

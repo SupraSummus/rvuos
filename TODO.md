@@ -664,13 +664,11 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   have the image skip such entries if one turns up.
 - A kernel without the self-check keeps `cap_stop_here`'s countdown,
   which only `OP_TEST_PREEMPT` arms, under tracing; `SELFCHECK=0` could drop it too.
-- The root task is granted one block of free RAM,
-  so what lies between the blocks is unused:
-  about 2.8 MiB on QEMU, where it does not matter, and 128 KiB and some of the kernel's 60 KiB on the ESP32-C6.
+- What lies between the blocks a board grants is unused:
+  about 2.8 MiB on QEMU, where it does not matter, and what the kernel leaves of its 60 KiB on the ESP32-C6.
   So is the root task's own memory past the boot pool, 60 KiB on QEMU and 28 KiB on the ESP32-C6,
   until the root task is gone; open decision 20 in `DESIGN.md`.
-  Grant the rest as further blocks, or lay the board out afresh,
-  when a board's RAM gets tight.
+  List the rest as further blocks, decision 40, or lay the board out afresh, when a board's RAM gets tight.
 - `pmp.h` names the protection unit's interface after PMP, and `kernel/arch/arm/mpu.c` implements it too;
   the image keeps PMP's encoding on both, but `pmp_set` and `pmp_entry_count` read as RISC-V's.
   Rename it in a change of its own, with the mutants that stand on its names in `process.c`,

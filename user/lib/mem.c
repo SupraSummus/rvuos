@@ -47,20 +47,34 @@ static uint32_t halve(struct self *s, struct block *b, uint32_t base, struct blo
 }
 
 /*
- * Whether it joined the free blocks back into the one they were all halved out of, which it does once every one is free:
- * revoking below that one deletes them all and leaves it whole.
+ * Whether it joined free blocks back into one of the boot's they were halved out of, which it does once every one
+ * of that one's is free: revoking below it deletes them all and leaves it whole.
  * Only when no free block will do, so that a block given back and taken again finds its halves still split.
  */
 static int join_all(struct self *s)
 {
-    if (s->free_count < 2 || mem_unused(s) != s->whole.size || rv_cap_revoke(s->table, s->whole.untyped) != KERR_OK) {
-        return 0;
+    for (uint32_t w = 0; w < SELF_WHOLES; w++) {
+        const struct block *whole = &s->whole[w];
+        uint32_t count = 0, size = 0;
+        for (uint32_t i = 0; i < s->free_count; i++) {
+            if (holds(whole, s->free[i].base, s->free[i].size)) {
+                count++;
+                size += s->free[i].size;
+            }
+        }
+        if (count < 2 || size != whole->size || rv_cap_revoke(s->table, whole->untyped) != KERR_OK) {
+            continue;
+        }
+        for (uint32_t i = s->free_count; i-- > 0;) {
+            if (holds(whole, s->free[i].base, s->free[i].size)) {
+                slot_back(s, s->free[i].untyped); /* the revoke emptied it */
+                s->free[i] = s->free[--s->free_count];
+            }
+        }
+        s->free[s->free_count++] = *whole;
+        return 1;
     }
-    while (s->free_count > 0) {
-        slot_back(s, s->free[--s->free_count].untyped); /* the revoke emptied it */
-    }
-    s->free[s->free_count++] = s->whole;
-    return 1;
+    return 0;
 }
 
 uint32_t mem_take_at(struct self *s, uint32_t base, uint32_t size, struct block *out)

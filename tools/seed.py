@@ -41,9 +41,9 @@ RECORD = struct.Struct("<BBHIIIIII")
 def defines():
     """
     Every object-like #define of the two headers, by name, as its text,
-    and BOOT_DEVICES, which a board's devices.h gives: none, since the seeds are QEMU's.
+    and BOOT_DEVICES and BOOT_RAM_BLOCKS, which a board's devices.h gives: none, since the seeds are QEMU's.
     """
-    found = {"BOOT_DEVICES": "0"}
+    found = {"BOOT_DEVICES": "0", "BOOT_RAM_BLOCKS": "0"}
     for header in HEADERS:
         for line in header.read_text().splitlines():
             m = DEFINE.match(line)

@@ -105,7 +105,7 @@ Memory map:
 | `0x40810000` | 64 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the two ranges below and makes nothing more |
 | `0x40810000` | 32 KiB | root task data and stack, read and write |
 | `0x40818000` | 4 KiB | the boot pool |
-| `0x40820000` | 128 KiB | unused |
+| `0x40820000` | 128 KiB | more free RAM, granted to the root task as an Untyped with all rights, `BOOT_CAP_MORE_RAM` |
 | `0x40840000` | 256 KiB | free RAM, granted to the root task as an Untyped with all rights |
 
 The code and input regions lie in flash, outside the root task's memory,
@@ -133,7 +133,8 @@ Interrupt lines:
 | 1 to 77 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 49 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 30 here and the root task's table has 76 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
+and after them, in slot 30, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
+so `BOOT_CAP_COUNT` is 31 here and the root task's table has 77 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
 They are the SAR ADC and the whole modem,
 where `make BOARD=esp32c6 phymap` and `make BOARD=esp32c6 wifi-esp32c6-map` find what ESP-IDF's PHY and Wi-Fi libraries reach,
 the eFuse's registers, the window onto flash, the ROM, the random number generator's data register,

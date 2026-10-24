@@ -47,10 +47,13 @@ uint32_t self_root(struct self *s, uint32_t units)
     s->regions = 0x3u; /* the boot installs the code in the first and the data in the second */
     TRY(s, "the root's region slots", rv_process_regions(s->process, &s->region_count, &s->region_most));
 
-    uint32_t base, size, made;
-    TRY(s, "the free RAM", rv_untyped_info(BOOT_CAP_FREE_RAM, &base, &size, &made));
-    s->whole = (struct block){ BOOT_CAP_FREE_RAM, 0, base, size };
-    s->free[s->free_count++] = s->whole;
+    /* The free RAM and the board's further blocks, each free as a whole. */
+    for (uint32_t i = 0; i < SELF_WHOLES; i++) {
+        uint32_t slot = i == 0 ? BOOT_CAP_FREE_RAM : BOOT_CAP_RAM_BLOCKS + i - 1, base, size, made;
+        TRY(s, "the free RAM", rv_untyped_info(slot, &base, &size, &made));
+        s->whole[i] = (struct block){ slot, 0, base, size };
+        s->free[s->free_count++] = s->whole[i];
+    }
     PASS(slot_new(s, &s->inbox));
     TRY(s, "an inbox", rv_pool_alloc(s->pool, CAP_NOTIFICATION, s->inbox, 0));
     /* Every core's units, as many as it keeps account of, from the first core's: the units are numbered core by core. */

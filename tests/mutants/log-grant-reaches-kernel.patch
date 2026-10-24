@@ -8,7 +8,7 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -46,7 +46,7 @@ struct thread *boot_create_root(void)
+@@ -64,7 +64,7 @@ struct thread *boot_create_root(void)
      /* A device: read and write, never execute, and never a pool; see ram_contains. */
      boot_granted[2] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
      /* The kernel's log; the reader writes its mark into the header. Never a pool: a frame no Untyped covers. */

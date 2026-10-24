@@ -14,7 +14,7 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -22,6 +22,9 @@ struct granted_range boot_granted[GRANTED_RANGES];
+@@ -42,6 +42,9 @@ static bool ram_block_apart(const struct granted_range *g, unsigned at)
  struct thread *boot_create_root(void)
  {
      /* Its own node is a root until the Untyped it lies below is in the table. */

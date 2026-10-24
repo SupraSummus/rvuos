@@ -6,5 +6,6 @@
  * as DEVICE_RANGE_LIST in each board's board.h lists none.
  */
 #define BOOT_DEVICES 0
+#define BOOT_RAM_BLOCKS 0 /* no further blocks of RAM, from BOOT_CAP_RAM_BLOCKS up */
 
 #endif

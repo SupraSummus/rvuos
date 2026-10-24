@@ -91,6 +91,10 @@
     { U32(0x4001a000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x4001b000), U32(0x00001000), RIGHT_R | RIGHT_W },
 
+/* No further blocks of RAM beside the free RAM, which the ESP32-C6 has; see boot.c. */
+#define BOOT_RAM_BLOCKS 0
+#define RAM_BLOCK_LIST
+
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * A line is a peripheral's ID, as the product specification numbers them, the last SPIM3's, 47.

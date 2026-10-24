@@ -8,6 +8,7 @@
  * A frame maps at its own address, so a program names a register by the device's base.
  */
 #define BOOT_DEVICES 5
+#define BOOT_RAM_BLOCKS 0 /* no further blocks of RAM, from BOOT_CAP_RAM_BLOCKS up */
 #define BOOT_CAP_IO_BANK0   (BOOT_CAP_DEVICES + 0) /* the pins' functions, overrides and interrupts */
 #define BOOT_CAP_PADS_BANK0 (BOOT_CAP_DEVICES + 1) /* the pins' pads */
 #define BOOT_CAP_PIO0       (BOOT_CAP_DEVICES + 2)

@@ -33,6 +33,7 @@ struct block {
 
 #define SELF_SLOTS  128u /* the most slots of a table it keeps account of */
 #define SELF_BLOCKS 24u  /* the most free blocks it keeps */
+#define SELF_WHOLES (1u + BOOT_RAM_BLOCKS) /* the free RAM and the board's further blocks, see mem_take */
 #define SELF_ROOM_UNIT 0x1000u /* what room for children's data is handed out in, see self_room */
 #define SELF_CORES  4u   /* the most cores it keeps account of the units of */
 
@@ -59,7 +60,7 @@ struct self {
     /* Free memory: Untypeds, each of a block, none overlapping. */
     struct block free[SELF_BLOCKS];
     uint32_t free_count;
-    struct block whole; /* the block they were all halved out of, see mem_take */
+    struct block whole[SELF_WHOLES]; /* the boot's blocks they were all halved out of, the free RAM first; see mem_take */
     /* Room for children's data, if it was asked for: a frame, the region it is installed in, and a bit for each unit in use. */
     struct block room;
     uint32_t room_region, room_used;
@@ -87,7 +88,7 @@ struct self {
 
 /*
  * The root task's, from what the boot gave it: its slots past BOOT_CAP_COUNT, its regions past code and data,
- * the free RAM, and an inbox allocated from the boot pool.
+ * the free RAM and the board's further blocks of it, and an inbox allocated from the boot pool.
  * It keeps units of the first core for itself, from the first, and hands out the rest, of every core.
  */
 uint32_t self_root(struct self *s, uint32_t units);

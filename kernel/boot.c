@@ -13,6 +13,24 @@
 struct granted_range boot_granted[GRANTED_RANGES];
 
 /*
+ * Whether block g, the boot's grant at, lies in RAM and apart from the kernel, its log, the root task's memory,
+ * the free RAM and every grant before it, as a block of RAM no other Untyped covers must.
+ */
+static bool ram_block_apart(const struct granted_range *g, unsigned at)
+{
+    if (g->size == 0 || g->base - RAM_BASE >= RAM_SIZE || g->size > RAM_SIZE - (g->base - RAM_BASE) ||
+        ranges_overlap(g->base, g->size, RAM_BASE, KLOG_BASE + KLOG_REGION_SIZE - RAM_BASE)) {
+        return false;
+    }
+    for (unsigned i = 0; i < at; i++) {
+        if (ranges_overlap(g->base, g->size, boot_granted[i].base, boot_granted[i].size)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
  * The root task's code, data and input and the boot pool's block, BOOT_CAP_POOL_RAM,
  * are made of its memory, BOOT_CAP_ROOT_RAM, and hang right below it,
  * as they would once a loader had split that memory down to them
@@ -56,8 +74,16 @@ struct thread *boot_create_root(void)
         (struct granted_range){ COUNTER_ADDR & ~(counter_size - 1), counter_size, RIGHT_R };
     /* The board's devices, each a frame from BOOT_CAP_DEVICES up; the array is never empty. */
     static const struct granted_range devices[BOOT_DEVICES + 1] = { DEVICE_RANGE_LIST };
-    for (unsigned i = GRANT_DEVICES; i < GRANTED_RANGES; i++) {
+    for (unsigned i = GRANT_DEVICES; i < GRANT_RAM_BLOCKS; i++) {
         boot_granted[i] = devices[i - GRANT_DEVICES];
+    }
+    /* The board's further blocks of RAM, each an Untyped from BOOT_CAP_RAM_BLOCKS up; this array is never empty either. */
+    static const struct granted_range ram_blocks[BOOT_RAM_BLOCKS + 1] = { RAM_BLOCK_LIST };
+    for (unsigned i = GRANT_RAM_BLOCKS; i < GRANTED_RANGES; i++) {
+        boot_granted[i] = ram_blocks[i - GRANT_RAM_BLOCKS];
+        if (!ram_block_apart(&boot_granted[i], i)) {
+            kpanic("a block of RAM the board lists is not RAM of its own");
+        }
     }
 
     /* The grants become frames and the Untypeds as they are, and every one of those is a NAPOT block. */
@@ -138,11 +164,17 @@ struct thread *boot_create_root(void)
             kpanic("cannot fill the root task's table");
         }
     }
-    /* The board's devices, each made as it is stored, so that the stack does not grow with their count. */
+    /*
+     * The board's devices and further blocks of RAM, each made as it is stored, so that the stack does not grow
+     * with their count; they follow one another in the grants as in the slots.
+     */
+    _Static_assert(GRANT_RAM_BLOCKS - GRANT_DEVICES == BOOT_CAP_RAM_BLOCKS - BOOT_CAP_DEVICES,
+                   "the grants of the devices and the blocks lie as their slots do");
     for (unsigned i = BOOT_CAP_DEVICES; i < BOOT_CAP_COUNT; i++) {
         const struct granted_range *g = &boot_granted[GRANT_DEVICES + i - BOOT_CAP_DEVICES];
-        struct cap frame = cap_to_frame(g->base, g->size, g->rights);
-        if (cap_store(table, i, &frame, NULL) != KERR_OK) {
+        struct cap made = i < BOOT_CAP_RAM_BLOCKS ? cap_to_frame(g->base, g->size, g->rights)
+                                                  : cap_to_untyped(g->base, g->size, g->rights);
+        if (cap_store(table, i, &made, NULL) != KERR_OK) {
             kpanic("cannot fill the root task's table");
         }
     }

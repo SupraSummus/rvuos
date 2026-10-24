@@ -723,9 +723,10 @@ and drops into user mode with:
 | 19 | `BOOT_CAP_TEST` | `Test` | all |
 | 20 | `BOOT_CAP_ROUTES` | `RouteLine`: every channel of the board's router the kernel lends, section 5.13; empty where there is none | write |
 | 21 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's: read and write, but read only for the ESP32-C6's eFuse and read and execute for its window onto flash |
+| after them | `BOOT_CAP_RAM_BLOCKS` | `Untyped`s: one over each further block of RAM the board sets aside for the root task, in its order, none but on the ESP32-C6; section 3 | all |
 
-`BOOT_CAP_COUNT` is 21 plus `BOOT_DEVICES`, the count in the board's `devices.h`, which `rvuos.h` includes:
-21 on QEMU and the MPS2 boards, 26 on the nRF52840, 26 on RP2350 and 29 on the ESP32-C6.
+`BOOT_CAP_COUNT` is 21 plus `BOOT_DEVICES` plus `BOOT_RAM_BLOCKS`, the counts in the board's `devices.h`, which `rvuos.h` includes:
+21 on QEMU and the MPS2 boards, 26 on the nRF52840, 26 on RP2350 and 31 on the ESP32-C6.
 A root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 1.6 KiB of the boot pool,

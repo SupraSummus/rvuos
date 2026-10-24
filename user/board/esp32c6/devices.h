@@ -23,6 +23,10 @@
 #define BOOT_CAP_GPIO   (BOOT_CAP_DEVICES + 7) /* the GPIO matrix, the pins' routes and levels, 4 KiB */
 #define BOOT_CAP_HP_SYSTEM (BOOT_CAP_DEVICES + 8) /* HP_SYSTEM, which hands SRAM's banks to the dump engine, 4 KiB */
 
+/* The further block of RAM the boot grants as an Untyped from BOOT_CAP_RAM_BLOCKS up, beside the free RAM. */
+#define BOOT_RAM_BLOCKS 1
+#define BOOT_CAP_MORE_RAM (BOOT_CAP_RAM_BLOCKS + 0) /* 128 KiB from 0x40820000, right below the free RAM */
+
 #define SARADC_BASE       0x6000E000u
 #define MODEM_BASE        0x600A0000u
 #define BT_BB_BASE        0x600A2000u
