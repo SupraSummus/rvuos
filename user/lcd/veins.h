@@ -19,11 +19,15 @@
  * It moves on many timescales at once: a flicker, a flame's tongue, a log burning down.
  * Here beads of light run along the threads from picture to picture, threads form, join and break within seconds,
  * food comes and goes over tens of seconds, and over minutes the network turns from fine foam to clean cells
- * to a few long strands and back, as the rule's parameters wander,
- * each on a slow, smooth random walk towards no rhythm, since a rhythm the eye finds it soon stops watching.
+ * to a few long strands and back, its threads sharp or soft, smooth or fuzzy, slow or quick,
+ * as the rule's parameters drift, each on a slow, smooth random walk towards no rhythm,
+ * since a rhythm the eye finds it soon stops watching.
+ * How each drifts drifts too: its tempo and the place it is drawn to wander,
+ * now and then one changes its mind, and a few laws, drawn afresh now and then, tie one drift to another.
+ * A field of noise bends the rule from place to place, so that threads of different kinds grow side by side.
  *
  * It is coherent: nothing jumps, everything grows out of what was there.
- * Every change is local, a step of a pixel, or slow, a parameter's walk, in ranges where the rule makes threads,
+ * Every change is local, a step of a pixel, or slow, a drift, in ranges where the rule makes threads,
  * not fog or dust; and nothing flashes, since the exposure keeps the picture's mean light where it is.
  *
  * It looks alive: its parts seem to search, reach and choose.
@@ -36,16 +40,18 @@
  * a log settles, sparks rise.
  * Here food appears, a point of light the threads then find; at random, every VEINS_BLOOM_SECONDS on average,
  * a share of the agents bursts out of one point, a ring of threads that the network takes in;
- * and a few agents every picture start afresh somewhere, faint wisps in the dark between the threads.
+ * a few agents every picture start afresh somewhere, faint wisps in the dark between the threads;
+ * and now and then the threads turn into shadows on a brighter ground, and back.
  *
- * It is light coming out of the dark, warm and calm:
- * the trail is drawn in one ramp of colour, an ember's, from black through red and gold to nearly white,
+ * It is light coming out of the dark:
+ * the trail is drawn through a ramp of colour from black to nearly white, an ember's at first,
+ * whose colours drift every way while each keeps its light,
  * through a tone curve that keeps the dense threads from burning out and the faint glow around them visible,
- * dithered to RGB565 so that the glow's gradients do not band.
+ * over a background of two flowing noises, and dithered to RGB565 so that the gradients do not band.
+ * The panel's view glides across the world, which wraps round at its edges, so that it has no walls.
  *
- * And it is small: one rule, one ramp, integers only, the same work every picture.
- * The world is the panel's own pixels and wraps round at its edges, so that it has no walls,
- * and starts dark, every agent in one point, which bursts into a ring and the first network over the first seconds.
+ * And it is small: one rule, integers only, the same work every picture.
+ * It starts dark, every agent in one point, which bursts into a ring and the first network over the first seconds.
  *
  * It draws in sync with the refresh, or as fast as it can for sync 0, which tears, to measure it,
  * the trail spreading as it goes out over the bus,

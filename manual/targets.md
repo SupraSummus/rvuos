@@ -290,7 +290,7 @@ and renders on the host, against a model of the LCD, what it shows: `make lcd-si
 `scene=veins` grows a network of glowing threads from it, a slime mould's, as many pictures,
 in 256 KiB of the free RAM and the further block below it, which take the region slots of the input and the IO MUX once the pins are set up,
 its pictures going out by DMA from the further block, or through SPI2's buffer for `dma=0`,
-and as fast as it can draw them for `sync=0`, torn, rather than every other refresh.
+and as fast as it can draw them for `sync=0`, torn, rather than in step with the refresh.
 GPIO_EXT, with its sigma-delta modulator, lies in the GPIO's own page, on the IO MUX's clock, which the kernel leaves as the chip starts,
 so a program that holds the GPIO can drive a pin at a density of its own; `user/lcd/` dims the backlight so.
 The flash's pins are in the IO MUX, so a program that holds it can cut the flash off, the root task's code with it,
