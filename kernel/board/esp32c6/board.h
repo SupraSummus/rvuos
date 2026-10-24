@@ -37,6 +37,7 @@
  * A program that would rather run from RAM copies itself there; the kernel runs from RAM,
  * since every trap would otherwise take its code from the cache, where a program's own code from flash competes.
  */
+#define FLASH_BOOT        U32(0x00000000)
 #define FLASH_IMAGE_BASE  U32(0x42800000)
 #define FLASH_IMAGE_SIZE  U32(0x00100000)
 #define USER_CODE_FLASH   U32(0x00040000)

@@ -6,7 +6,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 
 | Limit | Value | Where |
 |---|---|---|
-| region slots per process | 1 to the PMP entries the kernel uses, as its creator asks: 16 on QEMU and the ESP32-C6, 8 on the ARM boards, 7 on RP2350's Hazard3 | `OP_POOL_ALLOC`; `OP_CAP_INFO` on a process; `PROCESS_REGION_SLOTS_MAX` |
+| region slots per process | 1 to the PMP entries the kernel uses, as its creator asks: 16 on QEMU, the ESP32-C6 and the ESP32-C5, 8 on the ARM boards, 7 on RP2350's Hazard3 | `OP_POOL_ALLOC`; `OP_CAP_INFO` on a process; `PROCESS_REGION_SLOTS_MAX` |
 | root task's region slots | 8, or fewer where the core has fewer entries | `ROOT_REGION_SLOTS` |
 | table slots per process | 2 | `PROCESS_TABLES` |
 | places per thread | 1 to the machine's cores, as its creator asks | `OP_POOL_ALLOC`; `OP_CAP_INFO` on a thread |
@@ -29,7 +29,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | default span, how soon a request is due that no wait or bind gave a span for, and a turn on spare time while another waits | the longest power of two of counts within a millisecond | `timer_default_span` in `kernel/timer.h`; `OP_CAP_INFO` on a `Clock` |
 | span, how soon a request is due | the default span, or a power of two of counts up to 2^29 | `SPAN_MAX`; `OP_TIME_BIND`, `OP_NOTIFY_WAIT`, `OP_NOTIFY_LEND` |
 | a step of the clock under tracing, `OP_TEST_TICK` | a millisecond of the counter's counts | `timer_step_counts` in `kernel/timer.h` |
-| interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, 32 on mps2-an385, 48 on mps2-an521, line 0 the log's | `IRQ_LINES` |
+| interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 85 on the ESP32-C5, 52 on RP2350, 32 on mps2-an385, 48 on mps2-an521, line 0 the log's | `IRQ_LINES` |
 | smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h`; `OP_CAP_INFO` on any frame |
 | kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |
 | replay records per input | 256 | `REPLAY_MAX_RECORDS` |
@@ -58,7 +58,9 @@ These are documented gaps, not surprises;
   the first core takes every device interrupt;
   `DESIGN.md`, open decision 24.
 - **ARM with no replay yet**, under QEMU and on RP2350's Cortex-M33; `TODO.md`.
-- **Boot from flash on the ESP32-C6 alone.**
+- **No counter's frame to read on the ESP32-C5**, whose core refuses user mode the CLINT;
+  `DESIGN.md`, open decision 41.
+- **Boot from flash on the ESP32-C6 and ESP32-C5 alone.**
   RP2350 runs from RAM, loaded by its bootrom over USB, and the nRF52840 from RAM, loaded over SWD.
 - **No loader.**
   The image embeds one program, linked at fixed addresses;

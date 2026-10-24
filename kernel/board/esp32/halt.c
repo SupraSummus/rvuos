@@ -1,5 +1,5 @@
 /*
- * How the ESP32-C6 halts, and what it does with the kernel's log then.
+ * How the ESP32-C6 and the ESP32-C5 halt, and what they do with the kernel's log then.
  *
  * The kernel has no console: kputc appends to the log
  * and a logger in user mode carries it out; see DESIGN.md, "The kernel log".
@@ -13,6 +13,7 @@
  * since nothing is left to wait for it.
  */
 
+#include "clic.h"
 #include "csr.h"
 #include "kernel.h"
 #include "klog.h"
@@ -76,7 +77,7 @@ void khalt(int code)
     usj_flush();
 
     /* Nothing may wake the core: every interrupt off, and wfi in case one is pending anyway. */
-    csr_write(mie, 0);
+    mie_clear(~0u);
     for (;;) {
         __asm__ volatile("wfi");
     }

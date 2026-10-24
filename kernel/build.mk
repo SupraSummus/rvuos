@@ -66,16 +66,17 @@ $(BUILD)/kernel-%.elf: $(BUILD)/kernel.elf $(BUILD)/user_blob-%.o
 	rm $@.own $@.checked
 	mv $@.tmp $@
 
-# The image the ESP32-C6 boots from, the flash from its start, see its board.h:
-# the kernel, the ELF without the root task's code, behind Espressif's header, which the ROM loads into RAM,
+# The image an ESP32-C6 or ESP32-C5 boots from, the flash from its start, see its board.h:
+# the kernel, the ELF without the root task's code, behind Espressif's header, at FLASH_BOOT, which the ROM loads into RAM,
 # then the root task's code at USER_CODE_FLASH, which runs from flash.
+# esptool names each chip as the board is named.
 # The header asks the ROM for dual I/O and 4 MiB; design/boards.md says what clock the ROM reads it at.
 # The ELF stays for the debugger and llvm-objdump.
 .PRECIOUS: $(BUILD)/kernel-%.elf
 $(BUILD)/kernel-%.bin: $(BUILD)/kernel-%.elf
 	$(OBJCOPY) -R .user_code $< $@.ram.elf
-	$(ESPTOOL) --chip esp32c6 elf2image --flash-mode dio --flash-freq 80m --flash-size 4MB -o $@.ram $@.ram.elf
+	$(ESPTOOL) --chip $(BOARD) elf2image --flash-mode dio --flash-freq 80m --flash-size 4MB -o $@.ram $@.ram.elf
 	$(OBJCOPY) -O binary -j .user_code $< $@.flash
-	$(ESPTOOL) --chip esp32c6 merge-bin -o $@ 0x0 $@.ram \
-		$(call board_hex,USER_CODE_FLASH,kernel/board/esp32c6/board.h) $@.flash
+	$(ESPTOOL) --chip $(BOARD) merge-bin -o $@ $(call board_hex,FLASH_BOOT,kernel/board/$(BOARD)/board.h) $@.ram \
+		$(call board_hex,USER_CODE_FLASH,kernel/board/$(BOARD)/board.h) $@.flash
 	rm $@.ram.elf $@.ram $@.flash

@@ -11,7 +11,7 @@ until the maintainer decides otherwise.
 1. **Target hardware.**
    Decision: QEMU `virt` for RV32 stays the development target,
    using only machine and user mode,
-   the ESP32-C6 is the first real board and RP2350 the second; see "Boards".
+   the ESP32-C6 is the first real board and RP2350 the second, and the ESP32-C5 a later one; see "Boards".
    QEMU implements 16 PMP entries;
    `PMP_MAX_ENTRIES` caps how many the kernel uses,
    so the design can be exercised with a budget of 8 or fewer.
@@ -946,3 +946,19 @@ until the maintainer decides otherwise.
     A block is a root of its own, as the free RAM is, so no operation joins it to another:
     `lib/mem.c` joins a block's halves back into the block, each block on its own.
     Before, the free RAM was one block, and the rest lay unused.
+
+41. **The counter's frame where user mode may load no counter.**
+    `OP_CLOCK_FRAME` promises a read-only frame over the counter's low word, read with a load and no call.
+    The ESP32-C5's core refuses user mode the CLINT, whose loads fault, and has no copy of `mtime` at another address;
+    of its CPU's own space only the machine CLINT and the CLIC answer, and the peripherals' counters are read by latching them first.
+    What it has is the `time` CSR, which reads `mtime`, and which user mode reads with `rdtime` once `mcounteren.TM` is set,
+    as measured on the chip; `rdtime` is one instruction, cheaper than a load from a device.
+    Working default: none. The boot grants the frame over `mtime` as everywhere, and a thread that installs and reads it faults,
+    so the demo stops there; `OP_CLOCK_READ` gives the time on every board.
+    The ways open:
+    on such a board the frame's install sets `mcounteren.TM` for the process that holds it, a CSR the kernel switches with the process,
+    and `rv_counter_low` reads `time` where the board says so, which keeps the capability and changes what a program executes;
+    or the kernel lets the faulting load through, since the core delivers the value before it reports the fault late,
+    which costs a trap a read and rests on a behaviour Espressif documents nowhere;
+    or `OP_CLOCK_FRAME` refuses on this board, and a program asks the kernel each time.
+    Decide with the maintainer.

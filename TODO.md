@@ -315,6 +315,19 @@ what is left:
   and a capture that does not stop, which ESP-SDR runs as a ring over two banks the engine and the CPU take turns at,
   where the radio's programs have one bank free; the diagnostic bus would need no bank, but its selector is not found.
 
+## ESP32-C5
+
+- The counter's frame faults when read, open decision 41, so `make BOARD=esp32c5 test` stops at the demo's "map the counter".
+- The modem, the radio and Wi-Fi: nothing yet, nor the devices beyond the four `board.h` lists,
+  the board's LCD on the SPI among them, whose clocks and resets lie in PCR, the kernel's.
+- 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
+  IDF-11064; the kernel sets 160 MHz.
+- Bus errors are taken late, several instructions past the access, with `mtval` exact and `mepc` past it,
+  as measured on the chip; PMP's faults are exact. A fault the kernel reports may name the wrong instruction.
+- Whether a misaligned access is checked by halves, as the ESP32-C6's erratum DIG-694 has it:
+  `PMP_SPLIT_STORE_AS_READ` stays set until a test shows either; the escape suite passes with it.
+- `make BOARD=esp32c5 bench` and `lib-test` were not run; the bench needs records of its own.
+
 ## RP2350
 
 - Hazard3's `mtval` reads zero, so a fault report names no address there.

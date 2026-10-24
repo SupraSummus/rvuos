@@ -2,6 +2,7 @@
  * Trap dispatch.
  */
 
+#include "clic.h"
 #include "csr.h"
 #include "irq.h"
 #include "kernel.h"
@@ -29,9 +30,9 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
     irq_sync();
 #endif
     struct core *core = core_self();
-    bool traced = timer_trap_enter((csr_read(mip) & MIP_MTIP) != 0);
+    bool traced = timer_trap_enter((mip_read() & MIP_MTIP) != 0);
 
-    uint32_t cause = csr_read(mcause);
+    uint32_t cause = csr_read(mcause) & MCAUSE_CAUSE;
     if (cause & MCAUSE_INTERRUPT) {
         /* mepc points at the interrupted instruction, which resumes as it was. */
         switch (cause & ~MCAUSE_INTERRUPT) {
@@ -108,7 +109,7 @@ bool intr_wait(uint64_t at)
     timer_set(at);
     core_stall_begin();
     uint32_t ip;
-    while (((ip = csr_read(mip)) & mip_wake) == 0) {
+    while (((ip = mip_read()) & mip_wake) == 0) {
         LOOP_WAIT("an interrupt to be pending");
         __asm__ volatile("wfi");
     }
@@ -125,7 +126,7 @@ bool intr_wait(uint64_t at)
 /* Another core waiting for the lock stops a walk as an interrupt does; see core_lock_waited. */
 bool intr_pending(void)
 {
-    return (csr_read(mip) & (MIP_MTIP | (1u << IRQ_EXT_CAUSE))) != 0 || core_lock_waited();
+    return (mip_read() & (MIP_MTIP | (1u << IRQ_EXT_CAUSE))) != 0 || core_lock_waited();
 }
 
 /*
@@ -134,9 +135,14 @@ bool intr_pending(void)
  * but for RP2350's Hazard3, which takes none there while it is clear, erratum RP2350-E7.
  * A trap from user mode saves MIE into MPIE, so every later mret sets it again.
  * So the timer runs from the first instruction.
+ * Under a CLIC, mret also restores the interrupt level from mcause, which the ROM may leave above zero,
+ * so mcause is cleared first; see clic.h.
  */
 void trap_start(struct trap_frame *frame)
 {
+#ifdef CLIC_CTRL
+    csr_write(mcause, 0);
+#endif
     csr_clear(mstatus, MSTATUS_MPP_MASK);
     csr_set(mstatus, MSTATUS_MPIE);
     trap_return(frame);

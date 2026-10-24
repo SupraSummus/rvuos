@@ -19,6 +19,8 @@ The kernel is the only code that runs in machine mode.
 The trap vector is in vectored mode on every board,
 a table whose every entry jumps to the one entry point,
 because the ESP32-C6 has no direct mode.
+The ESP32-C5 has neither: its core runs in CLIC mode alone, where every trap enters at the table's base,
+whose first entry jumps there too; see "Interrupt controller".
 User mode runs with `mstatus.MIE` set, from the `MPIE` the kernel sets before its first `mret`:
 the specification takes machine interrupts in user mode whatever `MIE` holds,
 but RP2350's Hazard3 takes none there while it is clear, erratum RP2350-E7.
@@ -144,12 +146,16 @@ The ESP32-C6 has a CLINT of Espressif's,
 whose counter and interrupt stay off until a control word starts them,
 and which counts at the CPU clock, 160 MHz, which the kernel sets at boot, see "Boards",
 then measures a millisecond of it against the 16 MHz system timer rather than trust the dividers.
+The ESP32-C5's is the same at SiFive's addresses, measured and set the same way,
+its interrupt enabled in the CLIC rather than in `mie`.
 RP2350's is the RISC-V platform timer in the Secure bank of SIO,
 counting the microseconds a tick generator divides from the crystal.
 
 A process reads the counter through a read-only region at `COUNTER_ADDR`, not with `rdtime`:
 the ESP32-C6 has no `time` CSR, but its CLINT has `UTIME`, a read-only copy of `mtime` for user mode.
 On QEMU the kernel clears `mcounteren` at boot, so `rdtime` traps on every board; see "Time".
+The ESP32-C5 has `time`, which reads `mtime` and which user mode reads once `mcounteren.TM` is set,
+but no copy of `mtime` user mode may load, so its counter's frame faults when read; open decision 41.
 User mode does not reach RP2350's SIO timer, so there the counter is TIMER0's, counting the same microseconds;
 TIMER0 keeps its high half below its low one, so the word above the counter is not its high half; see `TODO.md`.
 
@@ -187,6 +193,20 @@ for the lowest line that is high and routed;
 nothing is held between claim and completion,
 since masking the line already lowers the CPU interrupt.
 Source 0, the Wi-Fi MAC's, is shadowed by the log's line and cannot be bound.
+
+The ESP32-C5 has the ESP32-C6's matrix in front of a CLIC, the RISC-V core-local interrupt controller,
+which gives each of 48 interrupts, the core's 16 and the matrix's 32 above them, a word of its own:
+an enable, a pending bit, a trigger, a mode and a level.
+The core takes interrupts in CLIC mode alone: `mtvec`'s mode reads 3 whatever is written, `mie` is ignored and `mip` reads zero,
+an interrupt is taken only while its enable is set and its level is above `mintthresh`,
+and `mcause` keeps the previous mode, interrupt enable and level above its code, which `mret` restores.
+`kernel/arch/riscv/clic.h` makes `mie` and `mip` of the CLIC's words for the interrupts the kernel takes,
+reads `mcause`'s code as its low twelve bits, and `trap_start` clears `mcause` before its first `mret`,
+so that no level the ROM left holds user mode's interrupts back.
+rvuos routes every unmasked source to the matrix's interrupt 2, the CLIC's 18, and masks a source by routing it to interrupt 0, which is never enabled;
+the claim is the ESP32-C6's.
+A `wfi` with `MIE` clear ends on an enabled interrupt above `mintthresh` even while the CLIC's level is the top one,
+as it is in the kernel after an interrupt, which idles there without an `mret`.
 
 RP2350's Hazard3 keeps its controller in CSRs of its own, the Xh3irq extension:
 arrays of one bit per system IRQ that enable it, show it pending and force it,

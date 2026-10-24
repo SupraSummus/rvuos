@@ -166,6 +166,11 @@ trap_entry:
     csrr    t0, mepc
     sw      t0, FRAME_MEPC(sp)
     csrr    t0, mcause
+#ifdef CLIC_CTRL
+    /* The CLIC keeps the previous mode and level above the code; the frame holds the cause alone, see clic.h. */
+    li      t1, 0x80000fff
+    and     t0, t0, t1
+#endif
     sw      t0, FRAME_MCAUSE(sp)
     csrr    t0, mtval
     sw      t0, FRAME_MTVAL(sp)

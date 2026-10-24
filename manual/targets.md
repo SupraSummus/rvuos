@@ -31,9 +31,10 @@ and `thumbv8m.main-none-eabi` for the Cortex-M33, with no floating point and no 
 
 ### Boards
 
-Six boards are supported, chosen with `make BOARD=<board>`:
+Seven boards are supported, chosen with `make BOARD=<board>`:
 `qemu`, QEMU `virt` for RV32, the default,
 `esp32c6`, an Espressif ESP32-C6, as on Seeed Studio's XIAO ESP32-C6,
+`esp32c5`, an Espressif ESP32-C5, as on Waveshare's ESP32-C5-LCD-1.47,
 `rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, or with `ARCH=arm` on its Cortex-M33 ones, as on a Pico 2,
 `nrf52840`, a Nordic nRF52840, a Cortex-M4, as on Fanstel's BT840X,
 `mps2-an385`, QEMU's model of ARM's MPS2 board with a Cortex-M3,
@@ -201,6 +202,75 @@ No interrupt is delegated to user mode.
 The dedicated GPIO reaches a pad only through the GPIO matrix, `BOOT_CAP_GPIO`,
 and a pad routed to it is every process's, each driving it in its turns;
 the Wi-Fi system's root task routes none.
+
+#### ESP32-C5
+
+The chip boots from flash as the ESP32-C6 does, through the same `tools/esp32c6-run.py`, given `--chip esp32c5`,
+and the root task's code runs from flash through the cache;
+its ROM looks for the kernel at `0x2000` in flash rather than at its start.
+The demo stops where it reads the counter's frame with a load, see below.
+
+Memory map:
+
+| Range | Size | What |
+|---|---|---|
+| `0x2000BFF8` | 8 B | the CLINT's `mtime` at the CPU clock, 160 MHz, through `BOOT_CAP_CLOCK`; user mode's loads there fault, see below |
+| `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
+| `0x42840000` | 256 KiB | root task code, read and execute, from `0x40000` in flash |
+| `0x42880000` | 4 KiB | input region, read only, from `0x80000` in flash, where `tools/esp32c6-run.py --text` writes a configuration |
+| `0x40800000` to `0x4080F000` | 60 KiB | kernel code, data and stack |
+| `0x4080F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x40810000` | 64 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the two ranges below and makes nothing more |
+| `0x40810000` | 32 KiB | root task data and stack, read and write |
+| `0x40818000` | 4 KiB | the boot pool |
+| `0x40820000` | 128 KiB | more free RAM, granted to the root task as an Untyped with all rights, `BOOT_CAP_MORE_RAM` |
+| `0x40840000` | 128 KiB | free RAM, granted to the root task as an Untyped with all rights |
+
+The flash, 4 MiB in the ESP32-C5HF4's package, holds the image the build makes, `build/esp32c5/kernel-<program>.bin`, from 0:
+
+| Offset | What |
+|---|---|
+| `0x2000` | the kernel, behind Espressif's header, which the ROM loads into SRAM |
+| `0x40000` | the root task's code |
+| `0x80000` | the root task's input |
+
+Interrupt lines:
+
+| Line | What |
+|---|---|
+| 0 | the kernel log |
+| 1 to 85 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 55 |
+
+The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
+and after them, in slot 25, `BOOT_CAP_MORE_RAM`, an Untyped over the further block of RAM, 128 KiB from `0x40820000`,
+so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots:
+
+| Slot | Constant | Range | Size | What | Rights |
+|---|---|---|---|---|---|
+| 21 | `BOOT_CAP_EFUSE` | `0x600B4800` | 1 KiB | the eFuse's registers, the factory MAC address among them, short of the OTP debug registers above them | read |
+| 22 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM | read, execute |
+| 23 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
+| 24 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
+
+The modem is not listed yet, nor PCR, PMU and the LP domain.
+The flash's pins are in the IO MUX, so a program that holds it can cut the flash off, the root task's code with it,
+and so are the USB pins, which carry the console and the reset into the ROM's download mode.
+
+The CPU runs at 160 MHz, which the kernel sets at boot, and the clock counts its cycles,
+measured against the 16 MHz system timer as on the ESP32-C6.
+The compare is the CLINT's here too.
+The PMP has sixteen entries and a 128-byte grain, so the smallest frame a program maps is 128 bytes.
+Misaligned loads and stores go through in hardware.
+The core refuses user mode the CLINT, and holds no copy of `mtime` user mode may load,
+so a thread that installs the counter's frame and reads it faults; `OP_CLOCK_READ` gives the time as everywhere.
+`DESIGN.md`, open decision 41, holds what the frame becomes here.
+
+User mode can write some of the core's CSRs:
+`ustatus`, `utvec`, `utvt`, `uscratch`, `uepc`, `ucause`, `uintthresh`, one at `0x017` Espressif names nowhere,
+and the dedicated GPIO at `0x803` and `0x805`.
+Whenever another process has run, a program finds them set back: `utvec` at 3, `uintthresh` at 15, the others at zero.
+`ucause` holds `ustatus`'s UPIE in its bit 27, so a write of either is a write of both.
+No interrupt is delegated to user mode.
 
 #### RP2350
 
@@ -414,7 +484,7 @@ GNU make, `qemu-system-riscv32` and `qemu-system-arm`,
 the latter no newer than 10.2, since QEMU 11 never wakes the ARM demo from its first sleep; see `TODO.md`.
 No separate cross toolchain is needed.
 The host build needs clang's sanitizer and libFuzzer runtimes.
-The ESP32-C6 needs Espressif's `esptool`, version 5, as a command and as a Python module.
+The ESP32-C6 and ESP32-C5 need Espressif's `esptool`, version 5, as a command and as a Python module.
 RP2350 needs Python's `pyusb` and write access to the chip's USB devices,
 which a udev rule such as `SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", TAG+="uaccess"` gives.
 The nRF52840 needs OpenOCD, version 0.12, and an ST-Link on its SWD pins, which OpenOCD's udev rules open to the user.
@@ -457,6 +527,8 @@ make BOARD=esp32c6 escape lib-test    # the escape suite, and the library's test
 make BOARD=esp32c6 bench              # what a system call and a switch cost, in the core's cycles
 make BOARD=esp32c6 PORT=/dev/ttyACM1 run
 ```
+
+On the ESP32-C5, `make BOARD=esp32c5 PORT=<port> test escape` does the same.
 
 Opening the port resets the chip into the ROM's download mode,
 where `tools/esp32c6-run.py` writes into flash what it does not hold already,

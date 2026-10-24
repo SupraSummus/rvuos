@@ -237,6 +237,24 @@ So the install keeps such regions apart, see "Region slots",
 and the layout leaves a block between the log and the code and one between the data and the input.
 A program compiled for strict alignment meets neither half.
 
+**ESP32-C5** runs the escape suite, `make BOARD=esp32c5 escape`, and the demo up to the counter's frame, open decision 41,
+on Waveshare's ESP32-C5-LCD-1.47.
+It boots as the ESP32-C6 does, through the same runner, but its ROM finds the kernel at `0x2000` in flash, `FLASH_BOOT` in `board.h`.
+Its 384 KiB of SRAM are three blocks of 128 KiB: the kernel's and the root task's, the further block, and the free RAM.
+Its peripherals lie where the ESP32-C6's do; the two chips share their halt and their console in `esp32/`.
+Its core takes interrupts through a CLIC alone, see "Interrupt controller",
+and its CLINT is laid out as SiFive's, `mtime` at `0x2000BFF8`, which user mode may not read.
+Besides the access permission management units, CPU_APM among them, which keep user mode from even fetching from SRAM,
+TEE controllers give each peripheral a read and a write bit per security mode, resetting to machine mode's alone,
+so user mode reads every peripheral as zero; the kernel turns the units off and grants every TEE bit to every mode.
+The kernel sets 160 MHz, as on the ESP32-C6: ESP-IDF's 240 MHz raises the core's voltage first,
+and on this revision a move to it from PLL_F160M can stop the root clock, IDF-11064.
+User mode can write the N extension's CSRs, the CLIC's `utvt` and `uintthresh`, `uscratch`, an unnamed one at `0x017`, and the dedicated GPIO,
+which the kernel sets back whenever another process's thread runs;
+`ucause` holds `ustatus`'s UPIE, as `mcause` holds `mstatus`'s MPIE.
+Measured on the chip: sixteen PMP entries with a 128-byte grain, misaligned accesses done in hardware,
+PMP's faults exact, and bus faults taken several instructions late, `mtval` exact and `mepc` past the access.
+
 **mps2-an385** is QEMU's model of ARM's MPS2 board with the AN385 image, a Cortex-M3, and ARM's development target:
 `make BOARD=mps2-an385 test` runs the demo root task of `user/init/` there, the same program as on RISC-V,
 `make BOARD=mps2-an385 escape` the escape suite in ARM's instructions,
@@ -359,7 +377,7 @@ let go, a program sleeping in `wfe` slowed to a step every two seconds, so the b
 ## Architectures
 
 An architecture is the files of `kernel/arch/<arch>/` and `user/arch/<arch>/`,
-chosen by the board: `riscv` for QEMU virt, the ESP32-C6 and RP2350's Hazard3,
+chosen by the board: `riscv` for QEMU virt, the ESP32-C6, the ESP32-C5 and RP2350's Hazard3,
 `arm` for mps2-an385's Cortex-M3 and the nRF52840's Cortex-M4, ARMv7-M, and mps2-an521's and RP2350's Cortex-M33, ARMv8-M's Mainline.
 `arm` is both, and `ARMV8M` in its `arch.h` says which the compiler builds for;
 the MPU and the Security state are where they differ.

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "clic.h"
 #include "clint.h"
 #include "csr.h"
 #include "kernel.h"
@@ -45,7 +46,7 @@ void counter_compare(uint64_t v)
 
 void counter_compare_enable(void)
 {
-    csr_set(mie, MIE_MTIE);
+    mie_set(MIE_MTIE);
 }
 
 void clint_hold(void)
@@ -60,7 +61,7 @@ void clint_hold(void)
 #if CORES > 1 && defined(CLINT_MSIP)
 void ipi_enable(void)
 {
-    csr_set(mie, MIE_MSIE);
+    mie_set(MIE_MSIE);
 }
 
 void ipi_send(uint32_t core)

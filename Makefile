@@ -4,6 +4,7 @@
 # BOARD selects kernel/board/<board>/ and user/board/<board>/:
 #   qemu     QEMU virt, RV32, the default, and with the two MPS2 boards what `make check` runs on
 #   esp32c6  an ESP32-C6, written into its flash over USB and booted from there by its ROM
+#   esp32c5  an ESP32-C5, the same way
 #   rp2350   an RP2350, loaded into RAM through its bootrom over USB,
 #            on its Hazard3 cores, or with ARCH=arm on its Cortex-M33 ones
 #   mps2-an385  QEMU's MPS2 with the AN385 image, a Cortex-M3; `make arm-test` runs its demo
@@ -109,8 +110,9 @@ ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES) $(if $(filter-out 0,$(WI
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
 # A board's files are those of kernel/board/<board>/ and user/board/<board>/,
-# and of its family's directory beside them where boards share files: the two MPS2 boards share mps2/.
-BOARD_FAMILY := $(if $(filter mps2-%,$(BOARD)),mps2)
+# and of its family's directory beside them where boards share files: the two MPS2 boards share mps2/,
+# the ESP32-C6 and the ESP32-C5 esp32/.
+BOARD_FAMILY := $(if $(filter mps2-%,$(BOARD)),mps2,$(if $(filter esp32c%,$(BOARD)),esp32))
 FAMILY_DIRS  = $(if $(BOARD_FAMILY),$(1)/board/$(BOARD_FAMILY))
 
 # The kernel sees its architecture's and its board's headers,
@@ -138,17 +140,19 @@ RUN_INIT      := $(QEMU) $(QEMUFLAGS) -bios $(BUILD)/kernel-init.elf
 BOOT_PREFIX   := $(QEMU) $(QEMUFLAGS) -bios
 # Under -icount shift=0 the clock counts one nanosecond an instruction, so the benchmark counts instructions.
 BENCH_CPU_HZ  := icount
-else ifeq ($(BOARD),esp32c6)
+else ifneq ($(filter esp32c6 esp32c5,$(BOARD)),)
 # The replay driver's layout is QEMU's, see rvuos/replay.h, so only the demo is built.
 USER_PROGRAMS := init
 IMAGE         := bin
 PORT          ?= /dev/ttyACM0
 # The runner imports esptool, so it runs under the Python the esptool command runs under.
 ESPTOOL_PYTHON ?= $(or $(shell sed -n '1s/^\#!//p' "$$(command -v $(ESPTOOL))" 2>/dev/null),python3)
-RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) $(BUILD)/kernel-init.bin
-BOOT_PREFIX   := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT)
+RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --chip $(BOARD) --port $(PORT) $(BUILD)/kernel-init.bin
+BOOT_PREFIX   := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --chip $(BOARD) --port $(PORT)
 # The clock is the CLINT's mtime, which counts the core's cycles at the 160 MHz the kernel sets.
 BENCH_CPU_HZ  := clock
+# Where the ESP32-C5's transcripts differ from QEMU's, see tests/run.sh: a PMP grain of 128 bytes.
+BOARD_FACTS   := $(if $(filter esp32c5,$(BOARD)),BOARD_PMP_GRAIN=128)
 else ifeq ($(BOARD),rp2350)
 # The replay driver's layout is QEMU's, so only the demo is built, as for the ESP32-C6.
 # The runner loads the ELF's segments itself, and reboots into the cores the ELF is for; it needs pyusb.
@@ -209,7 +213,7 @@ BENCH_CPU_HZ  := 64000000
 # but a call whose frame it cannot stack is taken as the call, see tests/escape.sh.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm BOARD_STACKING=call
 else
-$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350, mps2-an385, mps2-an521 and nrf52840)
+$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, esp32c5, rp2350, mps2-an385, mps2-an521 and nrf52840)
 endif
 
 .PHONY: all clean check arm-test arm-test-an385 arm-test-an521 arm-test-an521-smp2 smp-test contents mac-trace-test loop-bounds-test

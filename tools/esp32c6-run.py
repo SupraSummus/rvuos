@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boot an rvuos image on an ESP32-C6 from flash and print what it writes.
+"""Boot an rvuos image on an ESP32-C6 or ESP32-C5 from flash and print what it writes.
 
 The image is the flash from its start, as kernel/build.mk makes it:
 what the ROM loads into RAM, behind Espressif's header, and the code that runs from flash after it.
@@ -15,7 +15,9 @@ and --text address:file a text, such as a configuration in the root task's input
 since the flash keeps what an earlier run left past a shorter file.
 What this reads on its standard input goes to the board, for a root task that takes commands from the console.
 
-Usage: tools/esp32c6-run.py [--port /dev/ttyACM0] [--timeout seconds] [--flash address:file]...
+--chip names the chip the image is for, esp32c6 unless it says esp32c5, and the run refuses any other.
+
+Usage: tools/esp32c6-run.py [--chip esp32c6] [--port /dev/ttyACM0] [--timeout seconds] [--flash address:file]...
                             [--text address:file]... image.bin
 """
 
@@ -40,10 +42,13 @@ def flash_file(spec, end=b""):
     return int(addr, 0), open(path, "rb").read() + end
 
 
-def connect(port):
+CHIPS = {"esp32c6": "ESP32-C6", "esp32c5": "ESP32-C5"}
+
+
+def connect(port, chip):
     esp = esptool.detect_chip(port)
-    if esp.CHIP_NAME != "ESP32-C6":
-        sys.exit(f"{port} is an {esp.CHIP_NAME}, not an ESP32-C6")
+    if esp.CHIP_NAME != CHIPS[chip]:
+        sys.exit(f"{port} is an {esp.CHIP_NAME}, not an {CHIPS[chip]}")
     esp.flash_spi_attach(0)
     # The ROM takes the flash for 2 MiB until told, and the driver lies past that.
     esp.flash_set_parameters(flash_size_bytes(esptool.cmds.detect_flash_size(esp) or "4MB"))
@@ -59,11 +64,11 @@ def flash(esp, files):
     esptool.cmds.write_flash(esp.run_stub(), stale)
 
 
-def boot(port, files):
+def boot(port, chip, files):
     """The flash made to hold files, and the chip booted from it; the serial port its output comes on."""
     # esptool reports on stdout, which carries the board's output here.
     with contextlib.redirect_stdout(sys.stderr):
-        esp = connect(port)
+        esp = connect(port, chip)
         flash(esp, files)
         # RTS resets the chip and DTR, low, lets it boot from flash; the USB Serial/JTAG controller stays connected.
         esp._port.dtr = False
@@ -84,6 +89,7 @@ def forward(serial):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--chip", choices=sorted(CHIPS), default="esp32c6")
     parser.add_argument("--port", default="/dev/ttyACM0")
     parser.add_argument("--timeout", type=float, default=None,
                         help="give up after this many seconds; by default wait for the halt")
@@ -100,7 +106,7 @@ def main():
         print("# flashed %#x sha256 %s" % (int(address, 0), hashlib.sha256(open(path, "rb").read()).hexdigest()))
     files = [flash_file(f"0:{args.image}")] + [flash_file(spec) for spec in args.flash] + \
             [flash_file(spec, b"\0") for spec in args.text]
-    serial = boot(args.port, files)
+    serial = boot(args.port, args.chip, files)
     threading.Thread(target=forward, args=(serial,), daemon=True).start()
     serial.timeout = 0.05
     deadline = None if args.timeout is None else time.monotonic() + args.timeout
