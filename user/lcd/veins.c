@@ -436,7 +436,9 @@ static void colour(const struct veins *v, uint32_t drift, int32_t level, int32_t
     }
     int32_t y = (77 * c[0] + 150 * c[1] + 29 * c[2]) >> 8, top = c[0] > c[1] ? c[0] : c[1];
     top = top > c[2] ? top : c[2];
-    y = y * 255 < level * top ? top * 255 / level : y;
+    /* The least light that keeps the brightest channel within 255, rounded up, so that a colour too dark for level meets it. */
+    int32_t least = (top * level + 254) / 255;
+    y = y < least ? least : y;
     for (uint32_t i = 0; i < 3; i++) {
         c[i] = c[i] * level / (y > 0 ? y : 1);
     }
