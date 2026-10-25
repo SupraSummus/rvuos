@@ -19,12 +19,14 @@
  * It moves on many timescales at once: a flicker, a flame's tongue, a log burning down.
  * Here beads of light run along the threads from picture to picture, threads form, join and break within seconds,
  * food comes and goes over tens of seconds, and over minutes the network turns from fine foam to clean cells
- * to a few long strands and back, its threads sharp or soft, smooth or fuzzy, slow or quick,
+ * to a few long strands and back, its threads sharp or soft, smooth or fuzzy, slow or quick, straight or winding as tendrils,
+ * of one scale or of two, coarse trunks with fine capillaries among them, the two scales drifting apart and together,
  * as the rule's parameters drift, each on a slow, smooth random walk towards no rhythm,
  * since a rhythm the eye finds it soon stops watching.
  * How each drifts drifts too: its tempo and the place it is drawn to wander,
  * now and then one changes its mind, and a few laws, drawn afresh now and then, tie one drift to another.
  * A field of noise bends the rule from place to place, so that threads of different kinds grow side by side.
+ * So the ways it varies vary too, rather than one thing changing faster or slower.
  *
  * It is coherent: nothing jumps, everything grows out of what was there.
  * Every change is local, a step of a pixel, or slow, a drift, in ranges where the rule makes threads,
@@ -38,14 +40,16 @@
  *
  * Something now and then rewards the waiting, at no interval one can count on, and is healed after:
  * a log settles, sparks rise.
- * Here food appears, a point of light the threads then find; at random, every VEINS_BLOOM_SECONDS on average,
- * a share of the agents bursts out of one point, a ring of threads that the network takes in;
+ * Here food appears, a point of light the threads then find; where the network draws a knot too tight for too long,
+ * as it does at a junction or round food, the knot bursts, a spray of rays flying out of it that the network takes back in,
+ * nothing choosing where or when, and how readily it bursts drifting, calm times and eruptive ones;
  * a few agents every picture start afresh somewhere, faint wisps in the dark between the threads;
  * and now and then the threads turn into shadows on a brighter ground, and back.
  *
  * It is light coming out of the dark:
  * the trail is drawn through a ramp of colour from black to nearly white, an ember's at first,
  * whose colours drift every way while each keeps its light,
+ * and whose hue and the background's push each other apart while they are near, so that the threads stand out;
  * through a tone curve that keeps the dense threads from burning out and the faint glow around them visible,
  * over a background of two flowing noises, and dithered to RGB565 so that the gradients do not band.
  * The panel's view glides across the world, which wraps round at its edges, so that it has no walls.
@@ -61,7 +65,6 @@
  */
 #define VEINS_AGENTS        12288u
 #define VEINS_MEMORY        (256u * 1024u)
-#define VEINS_BLOOM_SECONDS 20u
 
 void veins_draw(const struct st7789 *lcd, uint32_t (*random)(void), void *memory, uint32_t pictures, uint32_t sync);
 

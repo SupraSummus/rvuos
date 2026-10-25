@@ -322,7 +322,7 @@ what is left:
   the LCD's refresh, 60.08 Hz by that count and 60 by the ST7789's datasheet, sides with the measurement.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
-- `scene=veins` draws a picture in about 36 ms at 192 MHz, so in step with the refresh every third, 20 a second,
+- `scene=veins` draws a picture in about 43 ms at 192 MHz, so in step with the refresh every third, 20 a second,
   not the 30 its times are counted in; 240 MHz, or a cheaper picture, would bring it back.
 - Bus errors are taken late, several instructions past the access, with `mtval` exact and `mepc` past it,
   as measured on the chip; PMP's faults are exact. A fault the kernel reports may name the wrong instruction.
