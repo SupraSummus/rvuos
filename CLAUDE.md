@@ -34,6 +34,14 @@ so that a diff touches only the clause that changed.
 This applies to Markdown files, docstrings, and long comments.
 Do not reflow paragraphs to a fixed column width.
 
+The manual, `MANUAL.md` and `manual/`, is written in plain English,
+for readers whose English may be a second language.
+A sentence says one thing, with its subject first and its verb next.
+Steps, cases and lists of effects are lists, not clauses of one sentence.
+A word the manual gives a narrow meaning is in its table of words, in `MANUAL.md`,
+and keeps that one meaning.
+A rule comes first, and each board's exception after it.
+
 ## Before committing
 
 Run `make check`.
