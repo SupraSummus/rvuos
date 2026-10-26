@@ -27,7 +27,7 @@
 #include "panel.h"
 #include "image.h"
 
-#define BOARD_HZ 192030000u /* the ESP32-C5's core, as the kernel's clock reports it */
+#define BOARD_HZ 160000000u /* the ESP32-C5's core, PLL_F160M, as the kernel sets it and its clock reports it */
 
 static uint32_t scale = 2;
 static uint64_t every_ns;

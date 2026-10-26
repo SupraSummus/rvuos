@@ -343,6 +343,7 @@ Memory map:
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
 | `0x42840000` | 256 KiB | root task code, read and execute, from `0x40000` in flash |
 | `0x42880000` | 4 KiB | input region, read only, from `0x80000` in flash; `tools/esp32c6-run.py --text` writes a configuration there |
+| `0x42000000` | 1 MiB | the window onto flash, read and execute, from `0x210000` in flash, `BOOT_CAP_FLASH` |
 | `0x40800000` to `0x4080F000` | 60 KiB | kernel code, data and stack |
 | `0x4080F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
 | `0x40810000` | 64 KiB | the root task's memory, granted to it as an Untyped with all rights; the two ranges below were made from it, and it makes nothing more |
@@ -359,6 +360,7 @@ The flash is 4 MiB, in the ESP32-C5HF4's package.
 | `0x2000` | the kernel, behind Espressif's header; the ROM loads it into SRAM |
 | `0x40000` | the root task's code |
 | `0x80000` | the root task's input |
+| `0x210000` | a radio program, which runs from the window onto flash; `tools/esp32c6-run.py --flash` writes it there |
 
 Interrupt lines:
 
@@ -368,9 +370,9 @@ Interrupt lines:
 | 1 to 85 | the interrupt matrix's sources; a line's number is the source's number in Espressif's `soc/interrupts.h` plus one; the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's source is line 55 |
 
 The root task is granted a frame over each of the devices in the next table, from `BOOT_CAP_DEVICES` up.
-After them, in slot 28, it is granted `BOOT_CAP_MORE_RAM`:
+After them, in slot 31, it is granted `BOOT_CAP_MORE_RAM`:
 an Untyped over the further block of RAM, 128 KiB from `0x40820000`.
-So `BOOT_CAP_COUNT` is 29 here, and the root task's table has 75 slots:
+So `BOOT_CAP_COUNT` is 32 here, and the root task's table has 78 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
@@ -380,11 +382,18 @@ So `BOOT_CAP_COUNT` is 29 here, and the root task's table has 75 slots:
 | 25 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix: the pins' routes, levels and interrupts | read, write |
 | 26 | `BOOT_CAP_SPI2` | `0x60081000` | 4 KiB | SPI2, the general-purpose SPI controller; it drives the board's LCD | read, write |
 | 27 | `BOOT_CAP_RNG` | `0x600B2800` | 128 B | LPPERI's first words, as many as the PMP's grain; they hold the random number generator's registers: `RNG_DATA_SYNC` at `0x28`, which gives a new word at every read, and `RNG_CFG` at `0x24` | read |
+| 28 | `BOOT_CAP_SARADC` | `0x6000E000` | 4 KiB | the SAR ADC and the temperature sensor | read, write |
+| 29 | `BOOT_CAP_MODEM` | `0x600A0000` | 64 KiB | the whole modem: the Wi-Fi and 802.15.4 MACs, the basebands, the front end, and the analog I2C's master. The MACs are bus masters, so whoever holds this frame reaches all RAM | read, write |
+| 30 | `BOOT_CAP_FLASH` | `0x42000000` | 1 MiB | the window onto flash, from `0x210000` in flash | read, execute |
 
 **What is not listed.**
-The modem is not listed yet.
-PCR, PMU and the LP domain are not listed either,
+PCR, PMU and the LP domain are not listed,
 apart from the random number generator's words.
+The radio needs a few of their bits, so the kernel sets them at boot:
+
+- the SAR ADC's clocks, and the temperature sensor's;
+- the analog I2C buses that the PHY's calibration uses, the 5 GHz ones among them;
+- the power detector's capacitance in LP_AON.
 The GDMA is not listed, because it belongs to the kernel.
 
 **DMA.**

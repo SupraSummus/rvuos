@@ -317,14 +317,13 @@ what is left:
 
 ## ESP32-C5
 
-- The modem, the radio and Wi-Fi: no code yet, nor the devices beyond the five `board.h` lists;
-  what Espressif's RF test library tells of the modem is in `user/radio/esp32c5/hw/`, none of it tried on the chip.
-- The boot measures the core at 192.03 MHz, though `board.c` selects PLL_F160M and `design/boards.md` says 160 MHz;
-  the LCD's refresh, 60.08 Hz by that count and 60 by the ST7789's datasheet, sides with the measurement.
+- The radio and Wi-Fi: no code yet, though the kernel lists the modem, the SAR ADC and a window onto flash;
+  what Espressif's RF test library tells of the modem is in `user/radio/esp32c5/hw/`.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
-- `scene=veins` draws a picture in about 43 ms at 192 MHz, so in step with the refresh every third, 20 a second,
-  not the 30 its times are counted in; 240 MHz, or a cheaper picture, would bring it back.
+- `scene=veins` keeps in step with the refresh every fourth at 160 MHz, 15 pictures a second,
+  where it drew every third, 20 a second, at the 192 MHz the SPLL's dividers gave before the kernel set them;
+  240 MHz, or a cheaper picture, would bring back the 30 its times are counted in.
 - Bus errors are taken late, several instructions past the access, with `mtval` exact and `mepc` past it,
   as measured on the chip; PMP's faults are exact. A fault the kernel reports may name the wrong instruction.
 - Whether a misaligned access is checked by halves, as the ESP32-C6's erratum DIG-694 has it:

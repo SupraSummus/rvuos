@@ -268,6 +268,8 @@ so it lists no counter, and the demo skips what it times with loads of one.
 Besides the access permission management units, CPU_APM among them, which keep user mode from even fetching from SRAM,
 TEE controllers give each peripheral a read and a write bit per security mode, resetting to machine mode's alone,
 so user mode reads every peripheral as zero; the kernel turns the units off and grants every TEE bit to every mode.
+The HP controller's words run past the last its register header names to those ESP-IDF's `soc/apm_defs.h` numbers,
+the modem's power among them, which covers the MAC's power and timer block, MODEM_LPCON and the analog I2C master.
 Of the peripherals it lists SPI2, which drives the board's LCD, and not the GDMA, so SPI2 is no bus master to the program that holds it;
 SPI2's clocks are in PCR, which stays the kernel's, so the kernel sets them, 80 MHz for its master clock, and resets the controller at boot.
 The GDMA is the kernel's, which lends its transmit channels, see "DMA controllers" above,
@@ -276,8 +278,19 @@ It lists the random number generator too, read only, as the first 128 bytes of L
 where the ESP32-C6 lists the eight bytes of its data register;
 a program reads but cannot write the block's other words, the LP domain's clocks and resets among them,
 nor `RNG_CFG`, the generator's sources, which the kernel sets to sample the ring oscillator, as ESP-IDF does.
+For the radio's programs it lists, as the ESP32-C6 does, the SAR ADC, the whole modem in one frame, a bus master,
+and a window onto flash at the same offset, `0x210000`, which the MMU shows from `0x42000000`;
+the bits of PCR, the PMU and LP_AON that Espressif's PHY library sets, the 5 GHz band's analog I2C buses among them,
+the kernel sets at boot, as there.
+The ROM's `ets_delay_us` counts in `mcycle`, which user mode cannot read whatever `mcounteren` says,
+so a program has a delay of its own over `OP_CLOCK_READ`, where the ESP32-C6's ROM counts in a user-mode counter.
 The kernel sets 160 MHz, as on the ESP32-C6: ESP-IDF's 240 MHz raises the core's voltage first,
 and on this revision a move to it from PLL_F160M can stop the root clock, IDF-11064.
+It sets the SPLL's dividers first, which keep what was set before through a reset and the ROM's boot from flash,
+and which the board's boots found as for a 40 MHz crystal, 576 MHz on this board's 48 and PLL_F160M at 192,
+where ESP-IDF runs the SPLL, which the radio's baseband takes its clocks from too, at 480 alone;
+it writes them over the modem's analog I2C master, its clock forced on for it, as ESP-IDF's `clk_ll_bbpll_set_config` does,
+with the core on the crystal meanwhile.
 User mode can write the N extension's CSRs, the CLIC's `utvt` and `uintthresh`, `uscratch`, an unnamed one at `0x017`, and the dedicated GPIO,
 which the kernel sets back whenever another process's thread runs;
 `ucause` holds `ustatus`'s UPIE, as `mcause` holds `mstatus`'s MPIE.

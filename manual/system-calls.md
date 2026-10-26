@@ -1355,7 +1355,7 @@ These two counts are in the board's `devices.h`, which `rvuos.h` includes.
 `BOOT_CAP_COUNT` is:
 
 - 23 on QEMU and the MPS2 boards,
-- 29 on the ESP32-C5,
+- 32 on the ESP32-C5,
 - 28 on the nRF52840,
 - 28 on RP2350,
 - 34 on the ESP32-C6.

@@ -69,7 +69,7 @@ _Static_assert(W % 2u == 0, "the background's blocks tile a row");
 
 /*
  * Pictures a second, which the times here are counted in, as the board is meant to draw them, every other refresh;
- * the ESP32-C5 at 192 MHz draws every third, see TODO.md.
+ * the ESP32-C5 at 160 MHz draws every fourth, see TODO.md.
  */
 #define PICTURE_RATE 30u
 

@@ -37,6 +37,16 @@
  * The MMU maps 64 KiB pages, which the kernel's board_init sets before the root task runs; see board.c.
  * A program that would rather run from RAM copies itself there; the kernel runs from RAM, as on the ESP32-C6.
  */
+
+/*
+ * The window onto flash: FLASH_WINDOW_SIZE bytes of it from FLASH_WINDOW_FLASH,
+ * which board.c maps through the cache at FLASH_WINDOW_BASE,
+ * for a program too large for SRAM, such as the Wi-Fi system's driver, to run from.
+ * It lies past the image's MiB, at the same offset in flash as on the ESP32-C6, so the same tools write it.
+ */
+#define FLASH_WINDOW_BASE  U32(0x42000000)
+#define FLASH_WINDOW_SIZE  U32(0x00100000)
+#define FLASH_WINDOW_FLASH U32(0x00210000)
 #define FLASH_BOOT        U32(0x00002000)
 #define FLASH_IMAGE_BASE  U32(0x42800000)
 #define FLASH_IMAGE_SIZE  U32(0x00100000)
@@ -85,18 +95,28 @@
  * SPI2, the general-purpose SPI controller, which drives the Waveshare board's LCD;
  * it reaches memory only through the GDMA, which is not listed, so it is no bus master to whoever holds it.
  * Its clocks are the kernel's, in PCR; see board.c.
- * And the random number generator, in the smallest block that holds it, the first 128 bytes of LPPERI, the PMP's grain,
+ * The random number generator, in the smallest block that holds it, the first 128 bytes of LPPERI, the PMP's grain,
  * read only, since its other words reach the LP domain's clocks and resets and the generator's sources,
  * which the kernel sets; see board.c.
+ * The SAR ADC with the temperature sensor, whose clocks the kernel turns on,
+ * the whole modem in one frame, since a process has too few regions for its blocks one by one,
+ * and the window onto flash, read and execute.
+ * PCR, PMU and the LP domain stay the kernel's: they reach the whole chip's clocks, power and resets;
+ * what of them the radio needs, the kernel sets at boot; see board.c.
+ * The modem's two MACs, Wi-Fi's and 802.15.4's, are bus masters, which nothing confines,
+ * so whoever holds the modem reaches all RAM; see DESIGN.md, open decision 13.
  */
-#define BOOT_DEVICES 6
+#define BOOT_DEVICES 9
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x600B4800), U32(0x00000400), RIGHT_R },             \
     { U32(0x40000000), U32(0x00080000), RIGHT_R | RIGHT_X },    \
     { U32(0x60090000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x60081000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x600B2800), U32(0x00000080), RIGHT_R },
+    { U32(0x600B2800), U32(0x00000080), RIGHT_R },             \
+    { U32(0x6000E000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600A0000), U32(0x00010000), RIGHT_R | RIGHT_W },    \
+    { FLASH_WINDOW_BASE, FLASH_WINDOW_SIZE, RIGHT_R | RIGHT_X },
 
 /*
  * The DMA controller: the GDMA's three transmit channels, each reading memory into a device, SPI2 the one listed,

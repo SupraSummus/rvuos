@@ -25,10 +25,20 @@
  * so a program finds the controller as it comes out of reset, whatever the last one left.
  * Its function clock is PLL_F160M halved, 80 MHz, the most the controller takes; the program divides it further in SPI2's own registers.
  *
+ * The ROM hands over the SAR ADC, which board.h lists, with its and the temperature sensor's clocks off,
+ * so the kernel turns them on and lets the ADC's registers out of reset, as Espressif's PHY library does.
+ *
+ * That library, libphy.a, which the Wi-Fi driver runs while the radio's own code is not yet its own,
+ * also sets a few registers of the PMU, PCR and LP_AON, which no program reaches, and only one way:
+ * the analog I2C buses its calibration talks over powered, the 5 GHz ones among them, the baseband's I2C bus tied powered,
+ * a word of PCR's that ESP-IDF leaves reserved, beside the SAR ADC's clock dividers, whose low byte it sets to 10,
+ * and the power detector's capacitance.
+ * The kernel sets them at boot, as it does on the ESP32-C6, and the driver feigns the library's accesses to them.
+ *
  * The random number generator, which board.h lists read only, comes from the ROM stirring in two timers
  * but not sampling its ring oscillator, which the kernel turns on, as ESP-IDF does at its start.
  *
- * The MMU's only valid entries are the image's 64 KiB pages, see board.h, which the kernel sets,
+ * The MMU's only valid entries are the image's 64 KiB pages and the window's, see board.h, each run in order, which the kernel sets,
  * with the cache emptied of what the pages held before, then lets the cache's buses through.
  *
  * The core has user-mode traps, the N extension, and the CLIC's user-mode CSRs,
@@ -69,9 +79,12 @@
  * Each TEE controller's permission words, one a peripheral from the first to the last,
  * with a read bit for each of the four security modes in the low nibble and a write bit for each in the next.
  * The words between them that ESP-IDF names nothing in are written too.
+ * The HP controller's run past the last its register header names, the bit scrambler's at 0x140,
+ * to the modem's power's at 0x148, which soc/apm_defs.h names: the MAC's power and timer block, MODEM_LPCON
+ * and the analog I2C master, without which a radio's program reads them as zero and its writes there are lost.
  */
 #define TEE_PERI_FIRST       0x60098088u /* UART0's */
-#define TEE_PERI_LAST        0x60098140u /* the bit scrambler's, past SPI2's */
+#define TEE_PERI_LAST        0x60098158u /* the SLC host's, the last of ESP-IDF's soc/apm_defs.h */
 #define LP_TEE_PERI_FIRST    0x600B3404u /* the eFuse's */
 #define LP_TEE_PERI_LAST     0x600B344Cu /* LP_APM's */
 #define TEE_EVERY_MODE       0xFFu
@@ -82,6 +95,28 @@
 #define PCR_SPI2_RST_EN      (1u << 1)
 #define PCR_SPI2_CLKM_CONF   0x600960C8u
 #define PCR_SPI2_CLKM_80M    ((1u << 22) | (1u << 20) | (1u << 12)) /* CLKM_EN, PLL_F160M, divided by DIV_NUM 1 plus one */
+
+/* The SAR ADC's clocks and reset, and the temperature sensor's clock, in PCR. */
+#define PCR_SARADC_CONF       0x60096088u
+#define PCR_SARADC_CLK_EN     (1u << 0)
+#define PCR_SARADC_REG_CLK_EN (1u << 2) /* its registers' clock; bit 3 holds them in reset */
+#define PCR_TSENS_CLK_CONF    0x60096090u
+#define PCR_TSENS_CLK_XTAL    (1u << 20) /* TSENS_CLK_SEL */
+#define PCR_TSENS_CLK_EN      (1u << 22)
+#define PCR_TSENS_RST_EN      (1u << 23)
+#define PCR_RESERVED_14C      0x6009614Cu
+#define PCR_RESERVED_14C_LOW  0xFFu
+#define PCR_RESERVED_14C_PHY  10u
+
+/* The radio's analog power, in the PMU, and the power detector's capacitance, in LP_AON. */
+#define PMU_IMM_HP_CK_POWER     0x600B00CCu
+#define PMU_TIE_HIGH_XPD_BB_I2C (1u << 28) /* written, never read: ties the baseband's I2C bus powered */
+#define PMU_RF_PWC              0x600B0158u
+#define PMU_RF_I2C_ON           0xFB800000u /* XPD_CKGEN5G, TC5G_I2C, RX5G_I2C, XPD_PERIF_I2C to XPD_PLL_I2C */
+#define PMU_PERIF_I2C_RSTB      (1u << 26)
+#define LP_AON_SAR_CCT          0x600B1054u
+#define LP_AON_SAR2_PWDET_CCT   (7u << 29)
+#define LP_AON_SAR2_PWDET_CCT_4 (4u << 29)
 
 /* LPPERI's RNG_CFG, whose low bit has the generator sample its ring oscillator. */
 #define LPPERI_RNG_CFG       0x600B2824u
@@ -102,16 +137,24 @@
 #define CACHE_INVALIDATE     (1u << 0)
 #define CACHE_SYNC_DONE      (1u << 4)
 
+_Static_assert(FLASH_WINDOW_BASE % MMU_PAGE == 0 && FLASH_WINDOW_FLASH % MMU_PAGE == 0 &&
+                   FLASH_WINDOW_SIZE % MMU_PAGE == 0,
+               "the window is whole pages");
 _Static_assert(FLASH_IMAGE_BASE % MMU_PAGE == 0 && FLASH_IMAGE_SIZE % MMU_PAGE == 0 &&
                    USER_CODE_FLASH + USER_CODE_SIZE <= INPUT_FLASH && INPUT_FLASH + INPUT_SIZE <= FLASH_IMAGE_SIZE,
                "the image is whole pages, the root task's code and input in it");
-_Static_assert(FLASH_IMAGE_BASE >= MMU_BASE && FLASH_IMAGE_BASE + FLASH_IMAGE_SIZE <= MMU_BASE + MMU_PAGE * MMU_ENTRIES,
-               "the image lies in the MMU's space");
+_Static_assert(FLASH_WINDOW_BASE >= MMU_BASE && FLASH_IMAGE_BASE >= FLASH_WINDOW_BASE + FLASH_WINDOW_SIZE &&
+                   FLASH_IMAGE_BASE + FLASH_IMAGE_SIZE <= MMU_BASE + MMU_PAGE * MMU_ENTRIES &&
+                   FLASH_IMAGE_SIZE <= FLASH_WINDOW_FLASH,
+               "the window and the image lie apart in the MMU's space and in flash");
 
 /* The flash page entry i of the MMU shows, or 0 for none. */
 static uint32_t mmu_item(uint32_t i)
 {
     uint32_t at = MMU_BASE + i * MMU_PAGE;
+    if (at - FLASH_WINDOW_BASE < FLASH_WINDOW_SIZE) {
+        return MMU_VALID | (FLASH_WINDOW_FLASH + (at - FLASH_WINDOW_BASE)) / MMU_PAGE;
+    }
     if (at - FLASH_IMAGE_BASE < FLASH_IMAGE_SIZE) {
         return MMU_VALID | (at - FLASH_IMAGE_BASE) / MMU_PAGE;
     }
@@ -151,6 +194,14 @@ void board_init(void)
     REG(PCR_SPI2_CONF) = PCR_SPI2_CLK_EN | PCR_SPI2_RST_EN;
     REG(PCR_SPI2_CONF) = PCR_SPI2_CLK_EN;
     REG(PCR_SPI2_CLKM_CONF) = PCR_SPI2_CLKM_80M;
+    REG(PCR_SARADC_CONF) = PCR_SARADC_CLK_EN | PCR_SARADC_REG_CLK_EN;
+    REG(PCR_TSENS_CLK_CONF) = (REG(PCR_TSENS_CLK_CONF) & ~PCR_TSENS_RST_EN) | PCR_TSENS_CLK_XTAL | PCR_TSENS_CLK_EN;
+    REG(PCR_RESERVED_14C) = (REG(PCR_RESERVED_14C) & ~PCR_RESERVED_14C_LOW) | PCR_RESERVED_14C_PHY;
+
+    REG(PMU_RF_PWC) = (REG(PMU_RF_PWC) | PMU_RF_I2C_ON) & ~PMU_PERIF_I2C_RSTB;
+    REG(PMU_RF_PWC) |= PMU_PERIF_I2C_RSTB;
+    REG(PMU_IMM_HP_CK_POWER) = PMU_TIE_HIGH_XPD_BB_I2C;
+    REG(LP_AON_SAR_CCT) = (REG(LP_AON_SAR_CCT) & ~LP_AON_SAR2_PWDET_CCT) | LP_AON_SAR2_PWDET_CCT_4;
 
     REG(LPPERI_RNG_CFG) |= RNG_SAMPLE_ENABLE;
 
