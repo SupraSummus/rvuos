@@ -35,9 +35,9 @@ void mac_config_start(void)
  * below; the others carry the offset they were reached at, since what they are is not known.
  * Each of their read-modify-writes is one here, in their order, since the trace holds each access.
  */
-#define DUMP_CTRL_FRAME (MAC_BASE + 0x100u) /* what their hal_set_dump_ctrl_frame_cfg touches, beside the sniffers */
-#define TXRX_MAC_110  (MAC_BASE + 0x110u)
-#define TXRX_MAC_114  (MAC_BASE + 0x114u)
+#define DUMP_CTRL_FRAME (MAC_BASE + 0x100u + MAC_SHIFT) /* their hal_set_dump_ctrl_frame_cfg's, beside the sniffers */
+#define TXRX_MAC_110  (MAC_BASE + 0x110u + MAC_SHIFT)
+#define TXRX_MAC_114  (MAC_BASE + 0x114u + MAC_SHIFT)
 #define BBRXHUNG_TIME 0x600a4c1cu /* their hal_he_set_bbrxhung_time's low 12 bits; the txrx group's bits 30, 31 */
 #define TXRX_HAL_C20  0x600a4c20u
 #define TXRX_HAL_C24  0x600a4c24u
@@ -50,10 +50,10 @@ void mac_config_start(void)
  * hal_he_set_ack_rate, hal_mac_enable_low_rate and hal_mac_disable_low_rate write them, at these constant addresses
  * alone; written out below.
  */
-#define RATE_ACK0 (MAC_BASE + 0x440u)
-#define RATE_ACK1 (MAC_BASE + 0x444u)
-#define RATE_CTS0 (MAC_BASE + 0x44cu)
-#define RATE_CTS1 (MAC_BASE + 0x450u)
+#define RATE_ACK0 (MAC_BASE + 0x440u + MAC_RATE_SHIFT)
+#define RATE_ACK1 (MAC_BASE + 0x444u + MAC_RATE_SHIFT)
+#define RATE_CTS0 (MAC_BASE + 0x44cu + MAC_RATE_SHIFT)
+#define RATE_CTS1 (MAC_BASE + 0x450u + MAC_RATE_SHIFT)
 
 /*
  * The libraries' hal_he_set_bbrxhung_time, written out, the HE word their txrx and low-rate groups both write:
@@ -63,11 +63,15 @@ void mac_config_start(void)
 static void mac_he_set_bbrxhung_time(uint32_t interval)
 {
     uint32_t w = rd(BBRXHUNG_TIME) & 0xfffff000u;
+#ifdef RADIO_MAC_C5
+    w |= interval != 0 ? 0x3au : 0xfu; /* the ESP32-C5's own two values */
+#else
     if (interval != 0) {
         w |= 0x46u;
     } else {
         w |= 0x11u;
     }
+#endif
     wr(BBRXHUNG_TIME, w);
 }
 
@@ -80,6 +84,29 @@ static void mac_he_set_bbrxhung_time(uint32_t interval)
 #define HE_MAC_DELAY0 0x600a4c54u
 #define HE_MAC_DELAY1 0x600a4c58u
 
+#ifdef RADIO_MAC_C5
+/*
+ * The ESP32-C5's: its chip's path draws a number from the adapter's random, r, and puts r mod 11 into the receive
+ * delays, 0x100 more into 0x600a4c58's low ten bits and 0x101 more into 0x600a4c54's bits 21 to 30, around constants
+ * of its own; then its log reads the two words five times, reads the own start makes too, with no log of them.
+ */
+extern uint32_t osi_random32(void);
+
+static void mac_he_set_mac_delay(void)
+{
+    uint32_t r = osi_random32() % 11u;
+    wr(HE_MAC_DELAY1, (rd(HE_MAC_DELAY1) & 0xffe003ffu) | 0xf0000u);
+    wr(HE_MAC_DELAY1, (rd(HE_MAC_DELAY1) & ~0x3ffu) | (r + 0x100u));
+    wr(HE_MAC_DELAY1, (rd(HE_MAC_DELAY1) & 0x801fffffu) | 0x0bc00000u);
+    wr(HE_MAC_DELAY0, (rd(HE_MAC_DELAY0) & 0x801fffffu) | ((r + 0x101u) << 21));
+    wr(HE_MAC_DELAY0, (rd(HE_MAC_DELAY0) & 0xffe003ffu) | 0x9d800u);
+    (void)rd(HE_MAC_DELAY1);
+    (void)rd(HE_MAC_DELAY1);
+    (void)rd(HE_MAC_DELAY0);
+    (void)rd(HE_MAC_DELAY0);
+    (void)rd(HE_MAC_DELAY1);
+}
+#else
 static void mac_he_set_mac_delay(void)
 {
     wr(HE_MAC_DELAY1, (rd(HE_MAC_DELAY1) & 0xffe003ffu) | 0x123400u);
@@ -88,6 +115,7 @@ static void mac_he_set_mac_delay(void)
     wr(HE_MAC_DELAY0, (rd(HE_MAC_DELAY0) & 0x801fffffu) | 0x14000000u);
     wr(HE_MAC_DELAY0, (rd(HE_MAC_DELAY0) & 0xffe003ffu) | 0x9d800u);
 }
+#endif
 
 /*
  * The libraries' hal_he_set_ack_rate, written out: their four rate words given their values, 0x90a0b in 0x4440 and
@@ -115,6 +143,9 @@ static void mac_he_set_ack_rate(uint32_t rate)
 
 /* phy.c's own of the ROM's phy_disable_low_rate, which the low-rate group below calls first; also in osi.h. */
 extern void drv_phy_low_rate_disable(void);
+#ifdef RADIO_MAC_C5
+extern void drv_phy_busy_check(void); /* the ESP32-C5's phy.c's */
+#endif
 
 void mac_queues_init(void)
 {
@@ -190,7 +221,9 @@ void mac_rx_set_policy(uint32_t iface, uint32_t valid)
     } else {
         wr(w, rd(w) & ~BSSID_HI_POLICY);
     }
-    wr(p, rd(p) & ~0x40u);
+#ifndef RADIO_MAC_C5
+    wr(p, rd(p) & ~0x40u); /* the ESP32-C5's leaves 0x40 as it is */
+#endif
     if (valid) {
         wr(w, rd(w) | BSSID_FLAG);
         wr(a, rd(a) | STA_ADDR_FLAG);
@@ -224,12 +257,16 @@ void mac_rx_base_init(uint32_t base)
  * and the rest carry the offset they were reached at, since which bit is which is not known.
  */
 #define HE_CTRL     0x600a4c80u /* cleared before the calls and set after them, whatever it gates */
-#define HE_MAC_10C  (MAC_BASE + 0x10cu)
+#define HE_MAC_10C  (MAC_BASE + 0x10cu + MAC_SHIFT)
 #define COLOR_BITMAP (MAC_BASE + 0x48u) /* bit 0 their hal_mac_color_clr_bitmap sets, dbg_read_color_collision reads */
 #define COLOR_ISR 0x600a4c2cu /* bit 12, the interrupt their hal_mac_color_enable/disable_collision_isr gate */
 #define HE_HAL_C88  0x600a4c88u
 #define HE_HAL_CBC  0x600a4cbcu
+#ifdef RADIO_MAC_C5
+#define BEACON_CRC (MAC_BASE + 0x2b8u) /* what their pwr_hal_set_beacon_filter_frame_crc_state sets, the ROM's */
+#else
 #define BEACON_CRC (MAC_BASE + 0x2d4u) /* what their pwr_hal_set_beacon_filter_frame_crc_state sets, the ROM's */
+#endif
 #define HE_TABLE    0x600a55f0u /* their table, cleared */
 #define HE_TABLE_END 0x600a57d0u
 
@@ -255,6 +292,13 @@ static void mac_he_set_ersu(uint32_t enable)
  */
 static void mac_he_set_co_hosted_bss(uint32_t enable, uint32_t mask)
 {
+#ifdef RADIO_MAC_C5
+    /* The ESP32-C5's writes nothing where MAC_CONF(0)'s bit 8, multiple BSSIDs, is set, and reads the word again for
+       its log after. */
+    if (rd(MAC_CONF(0)) & 0x100u) {
+        return;
+    }
+#endif
     if (enable != 0) {
         wr(MAC_CONF(0), rd(MAC_CONF(0)) | 0x20000u);
         wr(MAC_CONF(0), (rd(MAC_CONF(0)) & 0xfffe01ffu) | (((0xffffffffu << (mask & 31u)) & 0xffu) << 9));
@@ -262,6 +306,9 @@ static void mac_he_set_co_hosted_bss(uint32_t enable, uint32_t mask)
         wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x20000u);
         wr(MAC_CONF(0), rd(MAC_CONF(0)) | 0x1fe00u);
     }
+#ifdef RADIO_MAC_C5
+    (void)rd(MAC_CONF(0));
+#endif
 }
 
 /*
@@ -344,6 +391,22 @@ static void mac_addr_set(uint32_t iface, const uint8_t *addr)
  * Their read of MAC_CONF(0) first is the guard: if its bit 17 is set, the call returns unwritten.
  */
 
+#ifdef RADIO_MAC_C5
+/* The ESP32-C5's: interface 2 and the second instance left alone, MAC_CONF(0) and HE_MULTI_BSSID(0) as above. */
+static void mac_he_clr_multi_bssid(void)
+{
+    if (rd(MAC_CONF(0)) & 0x20000u) {
+        return;
+    }
+    wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x100u);
+    wr(MAC_CONF(0), rd(MAC_CONF(0)) | 0x1fe00u);
+    wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0xffu);
+    wr(HE_MULTI_BSSID(0), rd(HE_MULTI_BSSID(0)) & 0xff00ffffu);
+    for (uint32_t a = TX_MPLEN(0); a != TX_MPLEN(TX_SLOTS); a -= TX_QUEUE_STEP) {
+        wr(a, rd(a) & ~0x4u);
+    }
+}
+#else
 static void mac_he_clr_multi_bssid(void)
 {
     static const uint8_t zero[6];
@@ -367,6 +430,7 @@ static void mac_he_clr_multi_bssid(void)
         wr(a, rd(a) & ~0x4u);
     }
 }
+#endif
 
 /*
  * The libraries' hal_he_set_bf_report_rate, written out: their beamforming report rate, a byte their two arguments
@@ -374,6 +438,25 @@ static void mac_he_clr_multi_bssid(void)
  * is taken off, less 0x1a -- and four read-modify-writes that put it into MAC+0x458's bits 21 to 27, 14 to 20, 7 to 13
  * and 0 to 6.
  */
+#ifdef RADIO_MAC_C5
+/*
+ * The ESP32-C5's, the ROM's: the rate folded as above, with bits 7 and 8 for two flags the start passes clear,
+ * into MAC+0x464's three nine-bit fields, 18 to 26, 9 to 17 and 0 to 8.
+ */
+#define HE_BF_REPORT_RATE (MAC_BASE + 0x464u)
+
+static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
+{
+    uint32_t v = rate & 0xffffu;
+
+    if (enable != 0) {
+        v = ((v - ((rate - 0x10u <= 9u) ? 0x10u : 0x1au)) & 0xffffu) | ((enable << 5) & 0x60u);
+    }
+    wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & 0xf803ffffu) | ((v << 18) & 0x07fc0000u));
+    wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & 0xfffc01ffu) | ((v << 9) & 0x0003fe00u));
+    wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & ~0x1ffu) | (v & 0x1ffu));
+}
+#else
 #define HE_BF_REPORT_RATE (MAC_BASE + 0x458u)
 
 static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
@@ -390,6 +473,7 @@ static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
     wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & 0xffffc07fu) | ((v << 7) & 0x3f80u));
     wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & ~0x7fu) | (v & 0x7fu));
 }
+#endif
 
 /*
  * The libraries' hal_init_bf, written out: their beamforming group. On 0x600a4c78, six read-modify-writes clear bits
@@ -407,6 +491,45 @@ static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
 #define BF_FEEDBACK (MAC_BASE + 0x9cu) /* bit 2 cleared and bit 3 set, as their esp_test_bf_set_feedback sets them */
 #define HE_HAL_7128 0x600a7128u
 
+#ifdef RADIO_MAC_C5
+/*
+ * The ESP32-C5's: 0x600a4c78 as above, but for the low byte's bit 0, which it keeps, and with bit 25 set, then its
+ * VHT beamformee, bit 26 set and bits 27 and 28 cleared, with two reads and three for its logs; MAC+0x480 and MAC+0x47c
+ * as the ESP32-C6's MAC+0x474 and +0x470; 0x600a4de0's top twelve bits 0x690, whatever they held; BF_FEEDBACK and
+ * the report rate as above; and 0x600a7128 and MODEM_SYSCON's WIFI_BB_CFG read for its log, 0x600a7128 not written.
+ */
+#define HE_MAC_480 (MAC_BASE + 0x480u)
+#define HE_MAC_47C (MAC_BASE + 0x47cu)
+#define MODEM_SYSCON_WIFI_BB_CFG 0x600a9c18u
+
+static void mac_init_bf(void)
+{
+    wr(HE_HAL_C78, rd(HE_HAL_C78) & ~0x200000u);
+    wr(HE_HAL_C78, rd(HE_HAL_C78) & ~0x800000u);
+    wr(HE_HAL_C78, rd(HE_HAL_C78) | 0x80000u);
+    wr(HE_HAL_C78, (rd(HE_HAL_C78) & ~0xff00u) | 0x7100u);
+    wr(HE_HAL_C78, (rd(HE_HAL_C78) & ~0xfeu) | 0x20u);
+    wr(HE_HAL_C78, (rd(HE_HAL_C78) & 0xfff8ffffu) | 0x50000u);
+    wr(HE_HAL_C78, rd(HE_HAL_C78) | 0x2000000u);
+    (void)rd(HE_HAL_C78);
+    (void)rd(HE_HAL_C78);
+    wr(HE_MAC_480, rd(HE_MAC_480) | 0x80000000u);
+    wr(HE_MAC_47C, (rd(HE_MAC_47C) & 0xff000fffu) | 0x801000u);
+    wr(HE_HAL_C78, rd(HE_HAL_C78) | 0x4000000u);
+    wr(HE_HAL_C78, rd(HE_HAL_C78) & 0xe7ffffffu);
+    (void)rd(HE_HAL_C78);
+    (void)rd(HE_HAL_C78);
+    (void)rd(HE_HAL_C78);
+    wr(HE_HAL_DE0, (rd(HE_HAL_DE0) & 0x000fffffu) | 0x69000000u);
+    wr(BF_FEEDBACK, rd(BF_FEEDBACK) & ~0x4u);
+    wr(BF_FEEDBACK, rd(BF_FEEDBACK) | 0x8u);
+    mac_he_set_bf_report_rate(1u, 0x10u);
+    for (uint32_t i = 0; i < 5u; i++) {
+        (void)rd(HE_HAL_7128);
+    }
+    (void)rd(MODEM_SYSCON_WIFI_BB_CFG);
+}
+#else
 static void mac_init_bf(void)
 {
     uint32_t base, field;
@@ -430,11 +553,16 @@ static void mac_init_bf(void)
     wr(HE_HAL_7128, (rd(HE_HAL_7128) & 0x00ffffffu) | 0xd2000000u);
     (void)rd(HE_HAL_7128); /* their body's last read, which it makes and does not use */
 }
+#endif
 
 /*
  * The libraries' hal_init_tb_tx, written out: their trigger-based TX word 0x600a4df8, bit 15 cleared and then bit 14.
  */
+#ifdef RADIO_MAC_C5
+#define HE_TB_TX 0x600a4e00u
+#else
 #define HE_TB_TX 0x600a4df8u
+#endif
 
 static void mac_init_tb_tx(void)
 {
@@ -458,14 +586,27 @@ static void mac_set_tx_min_pwr(int pwr)
  * came of a rate_to_index that read past their own table and reached no register.
  * phy_get_max_pwr is the driver's own now, and the host replay stubs it with the values of the recorded run.
  */
-static uint8_t mac_pwr_table[0x1a * 2u];
+#ifdef RADIO_MAC_C5
+/*
+ * The ESP32-C5's libphy.a gives three bytes a rate, and its hal_get_tx_pwr takes a second argument for the third,
+ * which its callers pass for the HE rates, 0x10 and up, alone.
+ */
+#define PWR_ENTRY 3u
+#else
+#define PWR_ENTRY 2u
+#endif
+static uint8_t mac_pwr_table[0x1a * PWR_ENTRY];
 
-extern void phy_get_max_pwr(uint32_t index, uint8_t out[2]);
+extern void phy_get_max_pwr(uint32_t index, uint8_t out[PWR_ENTRY]);
 
 /* The libraries' hal_get_tx_pwr, written out: a table entry; the rates above 0x19 they read ten back are unasked. */
 static uint8_t mac_get_tx_pwr(uint32_t index)
 {
+#ifdef RADIO_MAC_C5
+    return mac_pwr_table[PWR_ENTRY * index + (index >= 0x10u ? 2u : 0u)];
+#else
     return mac_pwr_table[2u * index];
+#endif
 }
 
 /*
@@ -479,7 +620,9 @@ static uint8_t mac_get_tx_pwr(uint32_t index)
 
 static void mac_init_tb_power(void)
 {
+#ifndef RADIO_MAC_C5
     uint8_t v[2];
+#endif
 
     wr(HE_TB_POWER0, (rd(HE_TB_POWER0) & ~0x3fu) | (mac_get_tx_pwr(0x10u) & 0x3fu));
     wr(HE_TB_POWER0, (rd(HE_TB_POWER0) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x11u) << 8) & 0x3f00u));
@@ -491,10 +634,13 @@ static void mac_init_tb_power(void)
     wr(HE_TB_POWER1, (rd(HE_TB_POWER1) & ~0x3f000000u) | (((uint32_t)mac_get_tx_pwr(0x17u) << 24) & 0x3f000000u));
     wr(HE_TB_POWER2, (rd(HE_TB_POWER2) & ~0x3fu) | (mac_get_tx_pwr(0x18u) & 0x3fu));
     wr(HE_TB_POWER2, (rd(HE_TB_POWER2) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x19u) << 8) & 0x3f00u));
+#ifndef RADIO_MAC_C5
+    /* The ESP32-C5's fills the third word's first two fields alone. */
     phy_get_max_pwr(0x1au, v);
     wr(HE_TB_POWER2, (rd(HE_TB_POWER2) & ~0x3f0000u) | (((uint32_t)v[0] << 16) & 0x3f0000u));
     phy_get_max_pwr(0x1bu, v);
     wr(HE_TB_POWER2, (rd(HE_TB_POWER2) & ~0x3f000000u) | (((uint32_t)v[0] << 24) & 0x3f000000u));
+#endif
 }
 
 /*
@@ -523,7 +669,7 @@ static void mac_init_imrsp_power(void)
 static void mac_init_tx_pwr(void)
 {
     for (uint32_t i = 0; i < 0x1au; i++) {
-        phy_get_max_pwr(i, &mac_pwr_table[2u * i]);
+        phy_get_max_pwr(i, &mac_pwr_table[PWR_ENTRY * i]);
     }
     mac_init_tb_power();
     mac_init_imrsp_power();
@@ -535,8 +681,13 @@ void mac_he_init(void)
     wr(HE_CTRL, rd(HE_CTRL) & ~0xc0000000u);
     mac_init_bf();
     wr(HE_MAC_10C, (rd(HE_MAC_10C) & ~0xc0000u) | 0x80000u);
+#ifdef RADIO_MAC_C5
+    wr(COLOR_BITMAP, (rd(COLOR_BITMAP) & ~0x1f8u) | 0x1e0u); /* the ESP32-C5's field is a bit wider */
+    wr(COLOR_ISR, rd(COLOR_ISR) | 0x1000u);                  /* and its colour collision's interrupt is on */
+#else
     wr(COLOR_BITMAP, (rd(COLOR_BITMAP) & ~0xfcu) | 0xf0u);
     wr(COLOR_ISR, rd(COLOR_ISR) & ~0x1000u);
+#endif
     mac_init_tb_tx();
     mac_init_tx_pwr();
     mac_he_set_ersu(0);
@@ -545,10 +696,16 @@ void mac_he_init(void)
     for (uint32_t a = HE_TABLE; a != HE_TABLE_END; a += 4u) {
         wr(a, 0);
     }
+#ifdef RADIO_MAC_C5
+    for (uint32_t i = 0; i < 4u; i++) {
+        wr(TX_CONF0(i), rd(TX_CONF0(i)) & ~0x40000000u); /* the ESP32-C5's clears bit 30 alone */
+    }
+#else
     wr(TX_CONF0(0), rd(TX_CONF0(0)) & ~0xc0000000u);
     wr(TX_CONF0(1), rd(TX_CONF0(1)) & ~0xc0000000u);
     wr(TX_CONF0(2), rd(TX_CONF0(2)) & ~0xc0000000u);
     wr(TX_CONF0(3), rd(TX_CONF0(3)) & ~0xc0000000u);
+#endif
     wr(TXRX_HAL_C98, rd(TXRX_HAL_C98) | 0x4u);
     wr(HE_HAL_CBC, rd(HE_HAL_CBC) | 0x80000000u);
     wr(HE_HAL_C88, rd(HE_HAL_C88) | 0x2u);
@@ -560,6 +717,12 @@ void mac_he_init(void)
     mac_he_set_bcast_ru(0x7fd, 0, 0);
     mac_he_set_uora_parameter(&uora);
     wr(MAC_TX_MIN_PWR, rd(MAC_TX_MIN_PWR) | 0x20000u); /* the HE group's bit 17 */
+#ifdef RADIO_MAC_C5
+    /* The ESP32-C5's hal_he_enable_dump_complete_hesigb(0) and hal_vht_enable_bwsignaling_rts(0): MAC+0x10c's bit 0
+       and HE_ERSU's bit 18 cleared. Their names give what they are. */
+    wr(MAC_BASE + 0x10cu, rd(MAC_BASE + 0x10cu) & ~0x1u);
+    wr(HE_ERSU, rd(HE_ERSU) & ~0x40000u);
+#endif
     wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x100u);
     wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x20000u);
     mac_he_clr_multi_bssid();
@@ -575,10 +738,10 @@ void mac_he_init(void)
  * the two six-bit groups of the word before the table (named for the six rules it holds a bit for, a guess),
  * or what the match is for.
  */
-#define RX_MATCH_CTRL(i)  (MAC_BASE + 0x120u + 4u * (i))
-#define RX_MATCH_VALUE(i) (MAC_BASE + 0x13cu + 4u * (i))
-#define RX_MATCH_MASK(i)  (MAC_BASE + 0x158u + 4u * (i))
-#define RX_MATCH_ENABLE   (MAC_BASE + 0x11cu)
+#define RX_MATCH_CTRL(i)  (MAC_BASE + 0x120u + MAC_SHIFT + 4u * (i))
+#define RX_MATCH_VALUE(i) (MAC_BASE + 0x13cu + MAC_SHIFT + 4u * (i))
+#define RX_MATCH_MASK(i)  (MAC_BASE + 0x158u + MAC_SHIFT + 4u * (i))
+#define RX_MATCH_ENABLE   (MAC_BASE + 0x11cu + MAC_SHIFT)
 
 void mac_rx_match_init(void)
 {
@@ -611,10 +774,13 @@ void mac_rx_match_init(void)
 void mac_low_rate_disable(void)
 {
     drv_phy_low_rate_disable();
+#ifndef RADIO_MAC_C5
+    /* The ESP32-C5's hal_mac_disable_low_rate writes none of the four, which its libphy.a's phy_disable_low_rate may. */
     wr(RATE_CTS0, 0x90a0bu);
     wr(RATE_CTS1, 0x50100u);
     wr(RATE_ACK0, 0x90a0bu);
     wr(RATE_ACK1, 0x50100u);
+#endif
     mac_he_set_bbrxhung_time(0);
 }
 
@@ -645,9 +811,14 @@ void mac_rx_reload_hw_beacon(void)
  * hal_timer_update_by_rtc sets with it; the rest of the word is their modem-state and TSF fields, which the driver's
  * start does not write.
  */
+#ifdef RADIO_MAC_C5
+#define TIMER_30 0x600ad830u
+#define LPCLK_CYCLE 0x600ad878u
+#else
 #define TIMER_30 0x600ad030u
-#define LPCLK_SYNC 0x08000000u       /* bit 27, their pwr_hal_set_lpclk_sync_enable's */
 #define LPCLK_CYCLE 0x600ad070u      /* their pwr_hal_set_lpclk_cycle_time's, in its low 18 bits */
+#endif
+#define LPCLK_SYNC 0x08000000u       /* bit 27, their pwr_hal_set_lpclk_sync_enable's */
 #define LPCLK_CYCLE_MASK 0x0003ffffu /* the low 18 bits, a Q13.19 period */
 
 void mac_timer_update_by_rtc(uint32_t which, uint32_t hz)
@@ -682,7 +853,11 @@ void mac_crypto_init(void)
  * and 4 cleared -- and the single word ANTENNA_MAC_2CC, cleared of 0 to 2 and set at 5. What ANTENNA_MAC_2CC holds
  * is not known; each access is one here, in their order, since the trace holds each.
  */
+#ifdef RADIO_MAC_C5
+#define ANTENNA_MAC_2CC  (MAC_BASE + 0x2b0u)
+#else
 #define ANTENNA_MAC_2CC  (MAC_BASE + 0x2ccu)
+#endif
 
 void mac_antenna_init(void)
 {
@@ -709,6 +884,9 @@ void mac_antenna_init(void)
 void mac_coex_pti_init(void)
 {
     wr(PTI_DEFAULT, rd(PTI_DEFAULT) | 0x20u);
+#ifdef RADIO_MAC_C5
+    wr(PTI_DEFAULT, rd(PTI_DEFAULT) | 0x10u); /* the ESP32-C5's hal_coex_enable_default_pti(1), which follows */
+#endif
 }
 
 void mac_rx_active_pti(uint32_t pti)
@@ -797,6 +975,11 @@ void mac_station_start(const uint8_t sta[6], void (*sta_start)(void))
     /* their wDev_Crypto_Disable passes hal_crypto_disable the mask their wdev wrote for the interface;
        the word reads 0 in the start, so the write returns what it read. */
     wr(KEY_VALID, rd(KEY_VALID));
+#ifdef RADIO_MAC_C5
+    /* The ESP32-C5's wifi_station_start then has the baseband check that it is busy, 0x18, and not that it idles,
+       0xaa: its libphy.a's set_bb_wdg(1, 0, 0x18, 0xaa), "(BB)enable busy check". */
+    drv_phy_busy_check();
+#endif
     sta_start();
 }
 

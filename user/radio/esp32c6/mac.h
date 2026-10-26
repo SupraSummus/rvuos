@@ -26,6 +26,15 @@
 #define MAC_CHANNEL_LAST  13u
 
 /*
+ * On the ESP32-C5 the radio may be tuned to 5 GHz's channels too, 36 to 64 and 100 to 140 as Europe has them,
+ * but the MAC sends on 2.4 GHz's 1 to 13 and 5 GHz's 36 to 48 alone, 5150 to 5250 MHz, which a station uses without
+ * detecting radar itself; it only listens on the others, those of DFS. mac_tx_send refuses any other channel.
+ * Only the ESP32-C5's build defines the two; the ESP32-C6's checks 1 to 13 where it tunes.
+ */
+int mac_channel_may_tune(uint32_t channel);
+int mac_channel_may_send(uint32_t channel);
+
+/*
  * A frame received whole: the 802.11 frame without its FCS, and what the MAC says of its reception.
  * Its length is the MAC's header's less the FCS, never more than the MAC wrote,
  * so a reader reads only the len bytes at frame, and no header of the MAC's.

@@ -46,11 +46,20 @@
 #define COLOR_STATUS     (MAC_BASE + 0xc34u) /* the BSS colour's interrupt, bit 12, set to clear */
 #define COLOR_CLEAR      (MAC_BASE + 0xc38u)
 #define COLOR_EVENT      0x1000u
+#ifdef RADIO_MAC_C5
+#define PWR_STATUS       0x600ad8b8u /* the MAC's power events, which come with its interrupt */
+#define PWR_CLEAR        0x600ad8bcu
+#else
 #define PWR_STATUS       0x600ad0b0u /* the MAC's power events, which come with its interrupt */
 #define PWR_CLEAR        0x600ad0b4u
+#endif
 #define TX_BLOCK         (MAC_BASE + 0xca8u) /* holds the MAC still, as hal_mac_deinit sets it and hal_mac_init clears it */
 #define TX_BLOCK_ALL     0x00ff1000u
+#ifdef RADIO_MAC_C5
+#define TX_BLOCK_BUSY    0x0000e000u /* still busy, three bits on the ESP32-C5 */
+#else
 #define TX_BLOCK_BUSY    0x00006000u /* still busy */
+#endif
 
 #define DESC_SIZE(f)   ((f) & 0x3fffu)
 #define DESC_LEN(f)    ((f) >> 14 & 0x3fffu)
@@ -226,9 +235,16 @@ void mac_default_policy(const uint8_t mac[6])
 #define SNIFF_ALL             0x00020000u
 #define SNIFF_DROPS           0x0000038fu
 #define SNIFF_MISC            (MAC_BASE + 0x0f4u)
+#ifdef RADIO_MAC_C5
+/* The ESP32-C5's filter is the ESP32-C6's eight bits up, with its low byte, bits 8 to 15, all set. */
+#define SNIFF_MISC_MASK       0x07ff00ffu
+#define SNIFF_MISC_NONE       0x0786ff00u
+#define SNIFF_MISC_BROKEN     0x06000000u /* bits 25 and 26 */
+#else
 #define SNIFF_MISC_MASK       0x0007fe00u
 #define SNIFF_MISC_NONE       0x00078600u
 #define SNIFF_MISC_BROKEN     0x00060000u /* bits 17 and 18 */
+#endif
 
 void mac_sniffer(int on)
 {
@@ -346,10 +362,13 @@ static int frame(struct desc *first, uint32_t n)
         mac_rx_counts.chained++;
         return 0;
     }
+#ifndef RADIO_MAC_C5
+    /* The ESP32-C5's header holds other fields there. */
     if (b[EXTRA_LO] != 0 || (b[EXTRA_HI] & 3u) != 0) {
         mac_rx_counts.odd++;
         return 0;
     }
+#endif
     if (!rx_ctrl_whole(b)) {
         mac_rx_counts.broken++;
         return 0;
@@ -488,11 +507,31 @@ static void hold(void)
     block();
 }
 
+#ifdef RADIO_MAC_C5
+int mac_channel_may_tune(uint32_t channel)
+{
+    return (channel >= MAC_CHANNEL_FIRST && channel <= MAC_CHANNEL_LAST) ||
+           (channel >= 36u && channel <= 64u && channel % 4u == 0) || (channel >= 100u && channel <= 140u && channel % 4u == 0);
+}
+
+int mac_channel_may_send(uint32_t channel)
+{
+    return (channel >= MAC_CHANNEL_FIRST && channel <= MAC_CHANNEL_LAST) ||
+           (channel >= 36u && channel <= 48u && channel % 4u == 0);
+}
+#endif
+
 const char *mac_channel(uint32_t channel)
 {
+#ifdef RADIO_MAC_C5
+    if (!mac_channel_may_tune(channel)) {
+        return "the channel, not one of 1 to 13, 36 to 64 or 100 to 140";
+    }
+#else
     if (channel < MAC_CHANNEL_FIRST || channel > MAC_CHANNEL_LAST) {
         return "the channel, not one of 1 to 13";
     }
+#endif
     hold();
     drv_phy_channel(channel);
     rx.channel = channel;
@@ -538,7 +577,9 @@ void mac_home_channel(void)
 {
     mac_deinit(); /* their ic_mac_deinit */
     phy_change_channel(2412u, 1u, 0u, 0u); /* their PHY's tune, which stays libphy's; the 1 and 0 are their call's */
-    wr(CSI_CBW, rd(CSI_CBW) & ~CSI_CBW_BIT8); /* their hal_mac_set_csi_cbw, the 0 their frame passes */
+#ifndef RADIO_MAC_C5
+    wr(CSI_CBW, rd(CSI_CBW) & ~CSI_CBW_BIT8); /* their hal_mac_set_csi_cbw, the 0 their frame passes; the C5's is empty */
+#endif
     tx_pwr_asked = 0;
     mac_tx_block_clear(); /* their ic_mac_init */
 }
@@ -697,13 +738,17 @@ static const struct tx_rate tx_rates[MAC_TX_RATES] = {
 #define TX_LOWEST (MAC_TX_RATES - 1u)
 #define TX_START  3u /* 24 Mb/s, the rate an access point's data starts at */
 
-extern int phy_get_max_pwr(uint8_t rate, int8_t pwr[2]); /* libphy's, which their hal_init_tx_pwr calls */
+extern int phy_get_max_pwr(uint8_t rate, int8_t *pwr); /* libphy's, which their hal_init_tx_pwr calls */
 
 static uint32_t tx_pwr[MAC_TX_RATES]; /* each rate's TX_PWR word, asked since the last retune */
 
 static uint32_t pwr_word(uint32_t i)
 {
+#ifdef RADIO_MAC_C5
+    int8_t own[3] = { 0, 0, 0 }, resp[3] = { 0, 0, 0 }; /* the ESP32-C5's libphy.a writes three bytes */
+#else
     int8_t own[2] = { 0, 0 }, resp[2] = { 0, 0 };
+#endif
     phy_get_max_pwr(tx_rates[i].code, own);
     phy_get_max_pwr(tx_rates[i].resp, resp);
     return (uint32_t)(uint8_t)own[0] | (uint32_t)(uint8_t)resp[0] << 16 | (uint32_t)(uint8_t)resp[1] << 24;
@@ -996,6 +1041,12 @@ const char *mac_tx_send(uint32_t len, uint32_t keyslot)
         osi_mutex_give(&tx_lock);
         return "the frame's length";
     }
+#ifdef RADIO_MAC_C5
+    if (!mac_channel_may_send(rx.channel)) {
+        osi_mutex_give(&tx_lock);
+        return "the channel, one the MAC only listens on";
+    }
+#endif
     uint32_t c = begun_cycles;
     wake_locked();
     if (!tx_pwr_asked) {

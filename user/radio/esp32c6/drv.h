@@ -2,7 +2,7 @@
 #define RVUOS_RADIO_DRV_H
 
 /*
- * A program of the ESP32-C6's radio, a child of the root task, and its page, which is all the two agree on;
+ * A program of the ESP32-C6's radio, or the ESP32-C5's, a child of the root task, and its page, which is all the two agree on;
  * the Wi-Fi station of user/wifi/esp32c6/ is one, and the programs of prog/ the others, see README.md.
  * A program is called the driver in the root task's log and in this file, as the station was the only one.
  *
@@ -26,14 +26,11 @@
  * or the dump engine's bank and HP_SYSTEM, which take the two.
  */
 
-#define DRV_ROM_RAM_BASE 0x4087c000 /* the ROM's data, to the block's end, which is the free RAM's */
-#define DRV_ROM_RAM_END  0x40880000
-#define DUMP_BANK_BASE   0x40840000 /* the free RAM's lower half, a bank of SRAM of its own */
-#define DUMP_BANK_SIZE   0x00020000
+#include "radio.h" /* the board's: where the ROM's data, the dump engine's bank and the station's block lie */
 #define DRV_IMAGE_MAX    0x00100000 /* the window onto flash, which the image's code and constants lie in */
 #ifndef DRV_RAM_BASE
-#define DRV_RAM_BASE     0x40860000
-#define DRV_RAM_SIZE     0x00020000
+#define DRV_RAM_BASE     DRV_STATION_RAM_BASE
+#define DRV_RAM_SIZE     DRV_STATION_RAM_SIZE
 #endif
 #define DRV_HEAP_END     DRV_ROM_RAM_BASE
 
@@ -90,8 +87,7 @@ extern char drv_ram_start[], drv_ram_size[];
  */
 #define DRV_LINE_FIRST 1u
 #define DRV_LINES      4u
-/* The IEEE 802.15.4 MAC's line, its ZB_MAC source's, which the root task carves for the driver alone; see i154.h. */
-#define DRV_LINE_I154 13u
+/* The IEEE 802.15.4 MAC's line, DRV_LINE_I154 of radio.h, the root task carves for the driver alone; see i154.h. */
 
 /*
  * The units of each of the adapter's threads, of the driver's own, which the root task gives it as their sum.
@@ -185,6 +181,10 @@ struct drv {
     struct drv_net joined;         /* the access point joined */
     volatile int authmode;         /* the joined network's, a WIFI_AUTH_ of esp.h */
     volatile uint32_t rx_frames, rx_dropped, tx_frames, tx_dropped;
+#ifdef RADIO_EFUSE_COPY
+    /* From the root task: the eFuse's words from RADIO_EFUSE_COPY, see radio.h, which the adapter answers reads of. */
+    uint32_t efuse[RADIO_EFUSE_WORDS];
+#endif
 };
 #endif
 

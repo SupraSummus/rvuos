@@ -1,11 +1,11 @@
 /*
- * The root task of the ESP32-C6's radio programs: it runs the program in the window onto flash as its child,
+ * The root task of the ESP32-C6's radio programs, and the ESP32-C5's: it runs the program in the window onto flash as its child,
  * the driver of drv.h, with what the program's header asks for, and ends the run when the program does.
  * For the Wi-Fi station it is the Wi-Fi system's root task besides: the driver and the network process of wifi.h,
  * each a child of its own, joined by the link, and the network process's clients, as on the Pico 2 W; see system.h.
  *
  * It reads the factory MAC address from the eFuse and what to do from the input region,
- * sets the XIAO ESP32-C6's RF switch to the antenna the configuration names,
+ * sets the XIAO ESP32-C6's RF switch to the antenna the configuration names, on a board that has one, see radio.h,
  * and builds the driver as a child that runs the image in the window onto flash, with exactly what drv.h lists;
  * if a network is named, it builds the network process too, which runs the IP stack of netproc.c,
  * and connects the two with the link.
@@ -68,14 +68,9 @@
 #define EFUSE_RD_MAC_SPI_SYS_1 (EFUSE_BASE + 0x48u)
 
 /*
- * The XIAO ESP32-C6's RF switch, between the chip and its two antennas, on two pins the ROM leaves floating:
- * GPIO3 low powers it, and GPIO14 picks the antenna on the board, low, or the U.FL connector, high, as Seeed's startup does.
- * Set so, a scan heard the nearest access point 12 to 22 dB louder, and two more,
- * and the station joined at -64 dBm where it joined at -85 with the pins left alone, measured on the chip.
- * Each pin is a plain output, through the IO MUX and the GPIO matrix.
+ * A board's RF switch, if radio.h names its pins, as the XIAO ESP32-C6's:
+ * each pin is a plain output, through the IO MUX and the GPIO matrix.
  */
-#define RF_SWITCH_POWER      3u
-#define RF_SWITCH_ANTENNA    14u
 #define IO_MUX_GPIO(n)       (IO_MUX_BASE + 4u + 4u * (n))
 #define IO_MUX_MCU_SEL       (7u << 12)
 #define IO_MUX_MCU_SEL_GPIO  (1u << 12)
@@ -85,6 +80,16 @@
 #define GPIO_FUNC_OUT_SEL(n) (GPIO_BASE + 0x554u + 4u * (n))
 #define GPIO_OUT_SEL_GPIO    128u /* the pin follows GPIO_OUT */
 
+/*
+ * The driver's first thread, which it reads the overruns of, and on a chip whose libraries' accesses outside the frames
+ * the driver's adapter feigns, see radio.h, watches and serves too, as under the trace.
+ */
+#ifdef RADIO_FEIGNED
+#define FIRST_THREAD_RIGHTS (RIGHT_R | RIGHT_W)
+#else
+#define FIRST_THREAD_RIGHTS RIGHT_R
+#endif
+
 enum antenna { ANTENNA_BOARD, ANTENNA_UFL, ANTENNA_NONE };
 
 static struct self self;
@@ -92,7 +97,7 @@ static const struct out kout = { log_write, (void *)BOOT_CAP_PRINT };
 static struct system sys = {
     .self = &self,
     .out = &kout,
-    .board = "an ESP32-C6",
+    .board = RADIO_CHIP,
     .clients_wanted = CLIENT_BIT(CLIENT_ECHO) | CLIENT_BIT(CLIENT_CLOCK),
 };
 static struct block drv_ram;
@@ -101,6 +106,9 @@ static struct drv_header program; /* the header of the program in the window ont
 static char program_name[32];
 static int leaving;
 static uint8_t mac[6];
+#ifdef RADIO_EFUSE_COPY
+static uint32_t efuse_copy[RADIO_EFUSE_WORDS]; /* for the driver's page, see radio.h */
+#endif
 static uint32_t tick_bit, seconds, run_s = RUN_S;
 static enum antenna antenna;
 static struct kernel_log klog;
@@ -256,6 +264,11 @@ static void read_mac(void)
     must("install the eFuse", region_install(&self, BOOT_CAP_EFUSE, RIGHT_R, &region));
     uint32_t lo = *(volatile uint32_t *)EFUSE_RD_MAC_SPI_SYS_0;
     uint32_t hi = *(volatile uint32_t *)EFUSE_RD_MAC_SPI_SYS_1;
+#ifdef RADIO_EFUSE_COPY
+    for (uint32_t i = 0; i < RADIO_EFUSE_WORDS; i++) {
+        efuse_copy[i] = *(volatile uint32_t *)(RADIO_EFUSE_COPY + 4u * i);
+    }
+#endif
     must("uninstall the eFuse", region_free(&self, region));
     uint8_t fused[6] = { (uint8_t)lo, (uint8_t)(lo >> 8), (uint8_t)(lo >> 16), (uint8_t)(lo >> 24), (uint8_t)hi,
                          (uint8_t)(hi >> 8) };
@@ -264,6 +277,7 @@ static void read_mac(void)
     }
 }
 
+#ifdef RF_SWITCH_POWER
 /* A pin made a plain output at a level, which is set before its output is enabled. */
 static void pin_out(uint32_t pin, int high)
 {
@@ -291,6 +305,15 @@ static void rf_switch(void)
     say(&kout, antenna == ANTENNA_UFL ? "root: the RF switch picks the U.FL connector\n"
                                       : "root: the RF switch picks the antenna on the board\n");
 }
+#else
+/* A board with no RF switch, whose antenna the configuration cannot pick. */
+static void rf_switch(void)
+{
+    if (antenna == ANTENNA_UFL) {
+        say(&kout, "root: this board has no RF switch, so antenna=ufl picks nothing\n");
+    }
+}
+#endif
 
 /*
  * The program's header, which its image starts with, and its name, read through the window onto flash for the moment.
@@ -319,9 +342,13 @@ static void program_read(void)
     }
     uint32_t end = program.ram_base + program.ram_size;
     if (program.ram_size == 0 || (program.ram_size & (program.ram_size - 1)) != 0 ||
-        (program.ram_base & (program.ram_size - 1)) != 0 || (uint32_t)program.ram_base < (uint32_t)(DUMP_BANK_BASE + DUMP_BANK_SIZE) ||
+        (program.ram_base & (program.ram_size - 1)) != 0 || (uint32_t)program.ram_base < (uint32_t)(DRV_RAM_LOWEST) ||
         end != DRV_ROM_RAM_END ||
-        ((program.needs & DRV_NEED_DUMP) && program.ram_base < (uint32_t)(DUMP_BANK_BASE + DUMP_BANK_SIZE) + program.ram_size)) {
+        ((program.needs & DRV_NEED_DUMP) && program.ram_base < (uint32_t)(DUMP_BANK_BASE + DUMP_BANK_SIZE) + program.ram_size)
+#ifndef BOOT_CAP_HP_SYSTEM
+        || (program.needs & DRV_NEED_DUMP)
+#endif
+    ) {
         say(&kout, "root: %s's block of RAM, %x and %x bytes, is not one the root task can give it\n", program_name,
             program.ram_base, program.ram_size);
         system_halt(SYSTEM_BROKEN);
@@ -634,18 +661,20 @@ static void driver_build(void)
         trace_give(c);
     } else {
         must("give the driver its first thread's overruns",
-             child_give(&self, c, c->thread, RIGHT_R, &p->own_thread));
+             child_give(&self, c, c->thread, FIRST_THREAD_RIGHTS, &p->own_thread));
         for (uint32_t i = 0; i < sizeof(trace_frames) / sizeof(trace_frames[0]); i++) {
             if (trace_frames[i].cap != BOOT_CAP_RNG || (program.needs & DRV_NEED_RNG)) {
                 must(trace_frames[i].name, child_map(&self, c, trace_frames[i].cap, trace_frames[i].rights, &region));
             }
         }
     }
+#ifdef BOOT_CAP_HP_SYSTEM
     if (program.needs & DRV_NEED_DUMP) {
         must("a frame of the dump's bank", mem_make(&self, &dump_bank, CAP_FRAME));
         must("give the driver the dump's bank", child_map(&self, c, dump_bank.made, RIGHT_R | RIGHT_W, &region));
         must("give the driver HP_SYSTEM", child_map(&self, c, BOOT_CAP_HP_SYSTEM, RIGHT_R | RIGHT_W, &region));
     }
+#endif
     must("what the driver builds of its own",
          child_give_own(&self, c, DRV_OWN_POOL, DRV_OWN_LINES, 0, DRV_OWN_UNITS, DRV_OWN_SLOTS, &p->own));
     must("give the driver the clock", child_give(&self, c, BOOT_CAP_CLOCK, RIGHT_R, &p->clock));
@@ -660,6 +689,9 @@ static void driver_build(void)
         must("the line's slot back", slot_free(&self, lines));
     }
     memcpy(p->mac, mac, 6);
+#ifdef RADIO_EFUSE_COPY
+    memcpy(p->efuse, efuse_copy, sizeof(efuse_copy));
+#endif
 }
 
 static void summary(void)

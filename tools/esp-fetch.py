@@ -25,8 +25,14 @@ With --rom-elf it writes the ESP32-C6's ROM as an ELF with its symbols, which to
 Espressif publishes it only in a release of every chip's ROM, about 4.9 MB,
 which is checked and unpacked in memory, so only the chip's 490 KB are kept.
 
-Usage: tools/esp-fetch.py --cache DIR --init-data FILE [--wifi]
-       tools/esp-fetch.py --rom-elf FILE
+With --chip esp32c5 it fetches the ESP32-C5's instead, from the commits ESP-IDF v5.5.4 pins:
+libphy.a, the ROM's linker scripts and the init data, and with --wifi the Wi-Fi libraries, libcoexist.a and libbtbb.a,
+which the radio's programs of user/radio/esp32c5/ link while the radio's code there is not yet its own,
+or read as the libraries' half of what the code does; no hostap nor Mbed TLS, which the ESP32-C6's fetch keeps.
+Its ROM is the revision the boards have, v1.0's, esp32c5_rev100_rom.elf.
+
+Usage: tools/esp-fetch.py [--chip esp32c6|esp32c5] --cache DIR --init-data FILE [--wifi]
+       tools/esp-fetch.py [--chip esp32c6|esp32c5] --rom-elf FILE
 """
 
 import argparse
@@ -83,6 +89,43 @@ ROM_ELFS_SHA256 = "caa463d3cbef2430a5a35847c1d9f2f152403b17a802050927ff60c8da54f
 ROM_ELF = "esp32c6_rev0_rom.elf"
 ROM_ELF_SHA256 = "788e1d38724aeb8fd974fa10c4a7b089c02627d35342ce84b9e0b12b239f3551"
 
+IDF_C5_COMMIT = "735507283d5b2f9fb363a1901172dbd9e847945d"  # v5.5.4
+PHY_LIB_C5 = "https://raw.githubusercontent.com/espressif/esp-phy-lib/3d57415af6e4c92eff2c4c3463e20a51d7340aba/esp32c5/"
+WIFI_LIB_C5 = "https://raw.githubusercontent.com/espressif/esp32-wifi-lib/b87cce81803b85c3639fb14bac6c24cff6d0fbad/esp32c5/"
+COEX_LIB_C5 = "https://raw.githubusercontent.com/espressif/esp-coex-lib/ee5cd79583c02f23e43e62931ffb55f5a4992d0f/esp32c5/"
+ROM_LD_C5 = f"https://raw.githubusercontent.com/espressif/esp-idf/{IDF_C5_COMMIT}/components/esp_rom/esp32c5/ld/"
+ESP_PHY_C5 = f"https://raw.githubusercontent.com/espressif/esp-idf/{IDF_C5_COMMIT}/components/esp_phy/esp32c5/"
+
+FILES_C5 = {
+    PHY_LIB_C5 + "libphy.a": "694c5df5679ae7bf503fe2d0a7e889873b65a37b459e4ce177904847a47ef80f",
+    ROM_LD_C5 + "esp32c5.rom.ld": "637024ecbece1dd8c8d7650f6f70e80a187fef8b06d8b6338a0a028979c47513",
+    ROM_LD_C5 + "esp32c5.rom.phy.ld": "58feb442aa4b1cc48377feaada8de39baaca6dcbfe3112ceed95af4905716bae",
+    ROM_LD_C5 + "esp32c5.rom.libgcc.ld": "009d22abadc18ff4e7483038ae197bd2cdb240e16a099616cbdb94a829017de6",
+    ROM_LD_C5 + "esp32c5.rom.libc.ld": "cb6a67941f5cd62066827bdff89f9646f2a39b5f3ecd5ba70f26dbc2e4c598e8",
+    ROM_LD_C5 + "esp32c5.rom.version.ld": "23cd17dd0fd04233ab90032374de646e265d76122f4b6afbcbea75963de12b88",
+    ESP_PHY_C5 + "phy_init_data.c": "60466e0d24d125e06d5fd7352dc28d30310abbcfdeb0a7eca3d8baf545caa80e",
+}
+
+WIFI_FILES_C5 = {
+    WIFI_LIB_C5 + "libnet80211.a": "607edde25d05e62d9b18de24994bf5cb510637de0591ec9bd7ddd9b6e27d44a9",
+    WIFI_LIB_C5 + "libpp.a": "de09094403c30902db13b0b244297aceba4ce0cc188377bdea09c5516c5c9c96",
+    COEX_LIB_C5 + "libcoexist.a": "2159c4932970566ced6984a8012a775767cac0e6609563dd4f183b7172b86fa7",
+    PHY_LIB_C5 + "libbtbb.a": "622115b666882a0179037aeeb62f4f4b9dd327edd0d9dfba9f784c30553f39fe",
+    ROM_LD_C5 + "esp32c5.rom.pp.ld": "d0e252f19ea67db95babca89dc9992bb21d43ea8ab3081a192d71e21fea3dc30",
+    ROM_LD_C5 + "esp32c5.rom.net80211.ld": "d90a707ee09856cbdf2af472114be66186964300fe82a3a1a3748418352767cb",
+    ROM_LD_C5 + "esp32c5.rom.coexist.ld": "e0848384d75e0de97dd9c29ee2ccc2723dfdf8779c4b6bbb6f8d3e3eb383fd05",
+}
+
+ROM_ELF_C5 = "esp32c5_rev100_rom.elf"
+ROM_ELF_C5_SHA256 = "49693d745eb4b4e6e6c77be4f5213765d545d8c7a1d9742a8a619bf596c4e27a"
+
+# What each chip fetches: its files, its Wi-Fi's, its init data's source and commit, its ROM's ELF, and whether
+# hostap and Mbed TLS come with its Wi-Fi.
+CHIPS = {
+    "esp32c6": (lambda: (FILES, WIFI_FILES, ESP_PHY, IDF_COMMIT, ROM_ELF, ROM_ELF_SHA256, True)),
+    "esp32c5": (lambda: (FILES_C5, WIFI_FILES_C5, ESP_PHY_C5, IDF_C5_COMMIT, ROM_ELF_C5, ROM_ELF_C5_SHA256, False)),
+}
+
 # CONFIG_ESP_PHY_MAX_WIFI_TX_POWER's default in ESP-IDF's components/esp_phy/Kconfig, in dBm.
 MAX_TX_POWER = 20
 
@@ -103,7 +146,7 @@ def fetch(cache, url, digest):
     return data
 
 
-def rom_elf(path):
+def rom_elf(path, name=ROM_ELF, digest=ROM_ELF_SHA256):
     if not os.path.exists(path):
         print(f"esp-fetch: fetching {ROM_ELFS}", file=sys.stderr)
         with urllib.request.urlopen(ROM_ELFS, timeout=60) as r:
@@ -111,12 +154,12 @@ def rom_elf(path):
         if hashlib.sha256(release).hexdigest() != ROM_ELFS_SHA256:
             sys.exit(f"esp-fetch: {ROM_ELFS} is not the release expected")
         with tarfile.open(fileobj=io.BytesIO(release)) as tar:
-            data = tar.extractfile(ROM_ELF).read()
+            data = tar.extractfile(name).read()
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path + ".tmp", "wb") as f:
             f.write(data)
         os.replace(path + ".tmp", path)
-    if hashlib.sha256(open(path, "rb").read()).hexdigest() != ROM_ELF_SHA256:
+    if hashlib.sha256(open(path, "rb").read()).hexdigest() != digest:
         sys.exit(f"esp-fetch: {path} is not the ROM expected; remove it to fetch it again")
 
 
@@ -154,29 +197,32 @@ def entry(text):
     sys.exit(f"esp-fetch: an init data entry this does not read: {text}")
 
 
-def init_data(source):
+def init_data(source, count=128):
     m = re.search(r"const esp_phy_init_data_t phy_init_data\s*=\s*\{\s*\{(.*?)\}\s*\};", source, re.S)
     if not m:
         sys.exit("esp-fetch: phy_init_data.c holds no phy_init_data")
     # The commas between entries, not those inside a LIMIT's parentheses.
     values = [entry(e.strip()) for e in re.split(r",(?![^(]*\))", m.group(1)) if e.strip()]
-    if len(values) != 128:
-        sys.exit(f"esp-fetch: phy_init_data has {len(values)} entries, not 128")
+    if len(values) != count:
+        sys.exit(f"esp-fetch: phy_init_data has {len(values)} entries, not {count}")
     return values
 
 
-def write_init_data(cache, path, wifi):
-    fetched = {url: fetch(cache, url, digest) for url, digest in (FILES | WIFI_FILES if wifi else FILES).items()}
-    if wifi:
+def write_init_data(cache, path, wifi, chip="esp32c6"):
+    files, wifi_files, esp_phy, commit, _, _, supplicant = CHIPS[chip]()
+    fetched = {url: fetch(cache, url, digest) for url, digest in (files | wifi_files if wifi else files).items()}
+    if wifi and supplicant:
         unpack(cache, "hostap", HOSTAP, HOSTAP_SHA256, HOSTAP_TOP, HOSTAP_PARTS)
         unpack(cache, "mbedtls", MBEDTLS, MBEDTLS_SHA256, MBEDTLS_TOP, MBEDTLS_PARTS)
-    values = init_data(fetched[ESP_PHY + "phy_init_data.c"].decode())
-    rows = ",\n".join("    " + ", ".join(f"0x{v:02x}" for v in values[i:i + 8]) for i in range(0, 128, 8))
+    # ESP-IDF's esp_phy_init_data_t: 256 bytes on the ESP32-C5, which has a second band's powers, 128 elsewhere.
+    count = 256 if chip == "esp32c5" else 128
+    values = init_data(fetched[esp_phy + "phy_init_data.c"].decode(), count)
+    rows = ",\n".join("    " + ", ".join(f"0x{v:02x}" for v in values[i:i + 8]) for i in range(0, count, 8))
     with open(path + ".tmp", "w") as f:
-        f.write(f"/* Written by tools/esp-fetch.py from ESP-IDF {IDF_COMMIT[:8]}'s phy_init_data.c "
+        f.write(f"/* Written by tools/esp-fetch.py from ESP-IDF {commit[:8]}'s phy_init_data.c "
                 f"with a maximum TX power of {MAX_TX_POWER} dBm. */\n\n"
                 "#include <stdint.h>\n\n"
-                f"const struct {{\n    uint8_t params[128];\n}} phy_init_data = {{{{\n{rows}\n}}}};\n")
+                f"const struct {{\n    uint8_t params[{count}];\n}} phy_init_data = {{{{\n{rows}\n}}}};\n")
     os.replace(path + ".tmp", path)
 
 
@@ -186,13 +232,15 @@ def main():
     ap.add_argument("--init-data")
     ap.add_argument("--rom-elf")
     ap.add_argument("--wifi", action="store_true")
+    ap.add_argument("--chip", choices=sorted(CHIPS), default="esp32c6")
     args = ap.parse_args()
     if args.init_data and not args.cache or not (args.init_data or args.rom_elf):
         ap.error("--init-data with --cache, or --rom-elf")
     if args.rom_elf:
-        rom_elf(args.rom_elf)
+        _, _, _, _, name, digest, _ = CHIPS[args.chip]()
+        rom_elf(args.rom_elf, name, digest)
     if args.init_data:
-        write_init_data(args.cache, args.init_data, args.wifi)
+        write_init_data(args.cache, args.init_data, args.wifi, args.chip)
 
 
 if __name__ == "__main__":

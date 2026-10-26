@@ -9,6 +9,8 @@
 
 #include <stdint.h>
 
+#include "radio.h" /* the board's */
+
 struct prof {
     uint32_t n;
     uint32_t most;
@@ -29,11 +31,19 @@ struct drv_prof {
 };
 extern struct drv_prof drv_prof;
 
+/*
+ * The core's cycles in the user-mode counter the program starts, see radio.c; a chip whose user mode reads no counter,
+ * the ESP32-C5, counts none, and its profile holds zeros.
+ */
 static inline uint32_t prof_cycles(void)
 {
+#ifdef RADIO_ROM_DELAY_UPCCR
     uint32_t c;
     __asm__ volatile("csrr %0, 0x802" : "=r"(c));
     return c;
+#else
+    return 0;
+#endif
 }
 
 static inline void prof_add(struct prof *p, uint32_t v)

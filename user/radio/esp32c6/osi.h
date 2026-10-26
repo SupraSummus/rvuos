@@ -81,6 +81,7 @@ struct thread *osi_self(void);
 uint64_t osi_now_us(void);
 /* The traced run's counters: the faults the watcher served, and the interrupts the adapter's thread ran. */
 uint32_t osi_faults_served(void);
+void osi_feigned_dump(void); /* the writes feigned to registers outside the frames, where radio.h names them */
 uint32_t osi_interrupts(void);
 /* trace=1: the driver's steps and the adapter calls, in request order, and their dump; see osi.c. */
 void osi_trace_init(uint32_t entries);
@@ -129,6 +130,8 @@ void drv_phy_off(void);
 void drv_phy_enable(void); /* the PHY and Wi-Fi's part of it */
 void drv_phy_disable(void);
 void drv_phy_channel(uint32_t channel);
+uint32_t drv_phy_channel_mhz(uint32_t channel); /* the ESP32-C5's: a channel's centre, 2.4 or 5 GHz */
+void drv_phy_busy_check(void); /* the ESP32-C5's: the baseband's watchdog as the station's start sets it */
 void drv_phy_low_rate_disable(void); /* the ROM's phy_disable_low_rate, the driver's own */
 /* The PHY kept to the temperature, once a second while the station is joined; see phy.c. */
 void drv_phy_track(void);

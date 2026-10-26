@@ -1,0 +1,21 @@
+# The places the own start's mac_config leaves the libraries' accesses out by design, on the ESP32-C5, each with its
+# reason, as user/radio/esp32c6/test/replay-expected.txt says for the ESP32-C6, whose format this is.
+
+# Interface 1's receive policy, the soft AP's: their hal_init's loop gives it its policy word and its policy,
+# which the own start leaves out, since the driver never brings that interface up; see the station's NOTES.md.
+-R4 0x600a40dc 0x00000000
+-W4 0x600a40dc 0x00000280
+-R4 0x600a40dc 0x00000280
+-W4 0x600a40dc 0x00000280
+-R4 0x600a40dc 0x00000280
+-W4 0x600a40dc 0x00000285
+-R4 0x600a40dc 0x00000285
+-W4 0x600a40dc 0x00000285
+-R4 0x600a40dc 0x00000285
+-W4 0x600a40dc 0x00000285
+-R4 0x600a400c 0x00000000
+-W4 0x600a400c 0x40000000
+-R4 0x600a400c 0x40000000
+-W4 0x600a400c 0x40000000
+-R4 0x600a4068 0x00000000
+-W4 0x600a4068 0x00000000

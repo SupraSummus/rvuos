@@ -96,6 +96,8 @@ and `WIFI_CONFIG` names a network to join from a file git does not track,
 A change to `user/wifi/esp32c6/`, `user/radio/esp32c6/`, `kernel/board/esp32c6/`, `user/tracer/` or `tools/mac-trace.py`
 follows the ESP32-C6's Wi-Fi driver's own rules as well, in `user/wifi/esp32c6/CLAUDE.md`,
 and a change to `user/radio/esp32c6/` the radio's programs' too, in `user/radio/esp32c6/CLAUDE.md`.
+A change to `user/radio/esp32c5/`, or to what of `user/radio/esp32c6/` it builds, with an ESP32-C5 connected,
+runs `make BOARD=esp32c5 radio PROG=listen`, which must hear beacons on a channel of each band that a computer beside it lists.
 
 `make check` builds no PHY harness, so a change to `user/phyblob/`, `user/phytrace.h` or the ESP32-C6's device ranges
 runs `make BOARD=esp32c6 phymap`, which builds the harness and lists what it reaches that no frame covers;

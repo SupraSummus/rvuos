@@ -85,6 +85,12 @@ static struct {
 
 /* The traced run's counters, for the step that holds it against the same window with no trace; see osi.h. */
 static uint32_t fault_count;
+
+#ifdef RADIO_FEIGNED
+#define FEIGNING 1
+#else
+#define FEIGNING 0
+#endif
 static uint32_t isr_count;
 
 uint32_t osi_faults_served(void)
@@ -273,10 +279,11 @@ struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_h
         drv_failed(osi.s->what ? osi.s->what : "adopt a thread", status);
         return 0;
     }
-    if (osi.d->trace == 1) {
+    if (osi.d->trace == 1 || FEIGNING) {
         /*
          * Trace mode: the driver's first thread is watched by the watcher too,
-         * so every fault of the driver's, the libraries' bring-up's among them, takes the one served path.
+         * so every fault of the driver's, the libraries' bring-up's among them, takes the one served path;
+         * so it is on a chip whose libraries' accesses outside the frames the watcher feigns, see feign.
          * The root task gave the driver a capability to that thread, drv.h's own_thread.
          */
         t->cap = osi.d->own_thread;
@@ -447,6 +454,67 @@ static void trace_cannot(struct thread *t)
     d->share.cannot = 1;
 }
 
+#ifdef RADIO_FEIGNED
+/*
+ * The registers outside the program's frames that Espressif's libraries reach on this chip, see the board's radio.h,
+ * which the kernel set at boot: an access to one is feigned here, a read answered from the register's shadow
+ * and a write kept in it, and the thread resumed past the instruction, in trace mode too.
+ * Each write that changes a shadow is kept, as many as FEIGN_WRITES, for osi_feigned_dump to tell,
+ * as the path takes no lock: the thread it serves may hold the log's.
+ */
+#define FEIGN_WRITES 32u
+static struct {
+    uint32_t address, value;
+} feigned[] = { RADIO_FEIGNED };
+static struct {
+    uint32_t address, value, pc;
+} feign_writes[FEIGN_WRITES];
+static uint32_t feign_write_count, feign_reads;
+
+static int feign(struct thread *t)
+{
+    struct trace_req req;
+    struct trace_pending p;
+    if (trace_fault(t->cap, &req, &p) != 0 || req.width != 4) {
+        return -1;
+    }
+#ifdef RADIO_EFUSE_COPY
+    if (req.op == TRACE_READ && req.address - RADIO_EFUSE_COPY < 4u * RADIO_EFUSE_WORDS) {
+        req.value = osi.d->efuse[(req.address - RADIO_EFUSE_COPY) / 4u];
+        feign_reads++;
+        return trace_done(t->cap, &req, &p) == 0 ? 0 : -1;
+    }
+#endif
+    for (uint32_t i = 0; i < sizeof(feigned) / sizeof(feigned[0]); i++) {
+        if (feigned[i].address != req.address) {
+            continue;
+        }
+        if (req.op == TRACE_WRITE) {
+            if (feigned[i].value != req.value && feign_write_count < FEIGN_WRITES) {
+                feign_writes[feign_write_count].address = req.address;
+                feign_writes[feign_write_count].value = req.value;
+                feign_writes[feign_write_count].pc = req.pc;
+                feign_write_count++;
+            }
+            feigned[i].value = req.value;
+        } else {
+            req.value = feigned[i].value;
+            feign_reads++;
+        }
+        return trace_done(t->cap, &req, &p) == 0 ? 0 : -1;
+    }
+    return -1;
+}
+
+void osi_feigned_dump(void)
+{
+    drv_say("feign: %u reads, %u writes that changed a register\n", feign_reads, feign_write_count);
+    for (uint32_t i = 0; i < feign_write_count; i++) {
+        drv_say("feign: W %08x = %08x at %08x\n", feign_writes[i].address, feign_writes[i].value, feign_writes[i].pc);
+    }
+}
+#endif
+
 /* A fault the tracer cannot carry out, told without a lock; the root task halts the machine on it. */
 static void trace_fail(void)
 {
@@ -480,6 +548,12 @@ static void watcher_main(void *arg)
             if (!(bits & (BIT_FAULT << i)) || t->cap == 0) {
                 continue;
             }
+#ifdef RADIO_FEIGNED
+            if (feign(t) == 0) {
+                fault_count++;
+                continue;
+            }
+#endif
             if (osi.d->trace == 1) {
                 if (trace_serve(t, waiting > 1) == 0) {
                     fault_count++;
@@ -862,6 +936,17 @@ void drv_random(uint8_t *buf, size_t len)
         buf[i] = (uint8_t)(x ^ x >> 8 ^ x >> 16 ^ x >> 24);
     }
 }
+
+#ifdef RADIO_MAC_C5
+/* A random word, as the libraries' adapter's random gives one; macstart.c's MAC delays on the ESP32-C5 take one. */
+uint32_t osi_random32(void);
+uint32_t osi_random32(void)
+{
+    uint32_t r;
+    drv_random((uint8_t *)&r, sizeof(r));
+    return r;
+}
+#endif
 
 
 /* The slow clock's period in microseconds, as Q13.19: about 136 kHz, the RC oscillator's; not measured. */

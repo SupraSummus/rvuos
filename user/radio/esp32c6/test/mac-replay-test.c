@@ -129,6 +129,20 @@ void phy_get_max_pwr(uint32_t index, uint8_t out[2])
     out[1] = 0;
 }
 
+#ifdef RADIO_MAC_C5
+/* The adapter's random, which the ESP32-C5's MAC delays take a number from: 0, as the run the file was taken from had. */
+uint32_t osi_random32(void);
+uint32_t osi_random32(void)
+{
+    return 0;
+}
+
+/* The baseband's busy check of the station's start, libphy.a's, which hal_init, the file's run, does not reach. */
+void drv_phy_busy_check(void)
+{
+}
+#endif
+
 /* The low-rate group's first write, whose two words the recorded run's ROM made and the fixture leaves out. */
 void drv_phy_low_rate_disable(void)
 {

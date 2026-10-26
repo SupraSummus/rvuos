@@ -128,8 +128,11 @@ void drv_main(struct child_page *page)
      * The ROM's ets_delay_us counts the core's cycles in the user-mode performance counter, 0x802,
      * which rvuos leaves stopped in a new process and keeps with it after,
      * at the rate of the clock the ROM found, which the clock's own replaces; see manual/targets.md.
+     * A chip whose ROM counts in a counter user mode cannot read has the program's own delay instead; see radio.h.
      */
+#ifdef RADIO_ROM_DELAY_UPCCR
     __asm__ volatile("csrw 0x800, %0\n\tcsrw 0x801, %0" : : "r"(1));
+#endif
     uint64_t now;
     uint32_t hz;
     rv_clock_read(d->clock, &now, &hz);

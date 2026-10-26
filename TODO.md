@@ -317,8 +317,15 @@ what is left:
 
 ## ESP32-C5
 
-- The radio and Wi-Fi: no code yet, though the kernel lists the modem, the SAR ADC and a window onto flash;
-  what Espressif's RF test library tells of the modem is in `user/radio/esp32c5/hw/`.
+- Wi-Fi on both bands, see `user/radio/esp32c5/README.md`: the station and the network process over the MAC,
+  which hears both bands on `libphy.a`; then a PHY of its own in the library's place, as on the ESP32-C6.
+  On 5 GHz the station sends on channels 36 to 48 alone, and hears the channels of DFS, 52 to 144, without sending.
+- The band's word of `chm_set_current_band`, 0x600A4C94, for 5 GHz, and the TX slots' fields past the response's, unverified.
+- One run of `prog/listen.c` in about eight heard nothing on channel 1, on both of its visits, while 11 and 40 heard
+  their access points and a computer beside the board heard channel 1's; not understood, nor seen again.
+- When the ESP32-C6's MAC next changes, and its gate runs anyway: `mac_channel_may_tune` and `mac_channel_may_send`
+  for both chips, so that `mac_channel` and `mac_tx_send` lose their `RADIO_MAC_C5` branches,
+  and `pwr_word`'s three bytes for both.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
 - `scene=veins` keeps in step with the refresh every fourth at 160 MHz, 15 pictures a second,
@@ -659,6 +666,9 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   copying it once would spare about a dozen of every call's 450 instructions on QEMU virt, `make trap-profile`.
 - The four bytes little-endian, `le32`, is written three times, in `user/radio/esp32c6/mac.c`, `main.c` and `user/wifi/wlan.c`;
   one in `user/lib/` would serve all three.
+- A key's list of numbers is parsed six ways in the radios' programs: `hex_list` copied into `player.c` and `txdc.c`,
+  `list_of` in `synth154.c`, loops of their own in `bbpll.c` and `dacprobe.c`, and `numbers` in the ESP32-C5's `listen.c`;
+  one beside `config_value` would serve them all.
 
 - The runs that check the ESP32-C6's `mac.c` and the station's own code are `WIFI_CONFIG` variants run by hand,
   named in `user/wifi/esp32c6/CLAUDE.md`; a target that runs them all, `make BOARD=esp32c6 wifi-esp32c6-mac`, would hold them in one place.

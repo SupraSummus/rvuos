@@ -11,8 +11,24 @@
 #include <stdint.h>
 
 #include "devregs.h"
+#include "radio.h"
 
 #define MAC_BASE 0x600a4000u
+
+/*
+ * Where the ESP32-C5's MAC differs from the ESP32-C6's, which the board's radio.h says by RADIO_MAC_C5,
+ * as the two chips' libpp.a and ROMs show, see user/radio/esp32c5/hw/README.md:
+ * the run of words from MAC+0xf8 to MAC+0x170, the sniffers', the receive match's and their neighbours', lies a word
+ * further on, MAC_SHIFT; the rate words lie 0xc further, MAC_RATE_SHIFT; the TX slots' PPDU blocks are a word longer;
+ * and the MAC's timer block, at 0x600ad000 on the ESP32-C6, lies at 0x600ad800, some of its words two further.
+ */
+#ifdef RADIO_MAC_C5
+#define MAC_SHIFT      0x4u
+#define MAC_RATE_SHIFT 0xcu
+#else
+#define MAC_SHIFT      0x0u
+#define MAC_RATE_SHIFT 0x0u
+#endif
 
 #define RX_CTRL        (MAC_BASE + 0x080u)
 #define RX_CTRL_RELOAD 0x1u
@@ -22,7 +38,11 @@
 #define RX_WORD        (MAC_BASE + 0x98u)
 /* The STA's TSF and its wakeups (their hal_enable_sta_tsf, and the stop), and the cipher entries' valid bits
    (their hal_crypto_disable, and mac.c's own keys): both reached from mac.c and macstart.c. */
+#ifdef RADIO_MAC_C5
+#define TSF_CTRL  0x600ad858u /* paired with the ESP32-C6's by the two libraries' functions that reach it */
+#else
 #define TSF_CTRL  0x600ad050u
+#endif
 #define KEY_VALID 0x600a4814u
 /* The cipher engine's configuration word for the station's interface, KEY_CFG0: 0x30000 with the engine off,
    0x30103, which their hal_crypto_enable(0, 3, 0, 0) writes for CCMP, with the sending's bits set; see mac.c. */
@@ -87,15 +107,22 @@
 #define HE_AID   (MAC_BASE + 0x038u)
 #define HE_BCAST (MAC_BASE + 0x03cu)
 
-#define SNIFF_CTRL0           (MAC_BASE + 0x0f8u)
-#define SNIFF_CTRL1           (MAC_BASE + 0x0fcu)
+#define SNIFF_CTRL0           (MAC_BASE + 0x0f8u + MAC_SHIFT)
+#define SNIFF_CTRL1           (MAC_BASE + 0x0fcu + MAC_SHIFT)
 #define SNIFF_CTRL_NONE       0x05000000u
-#define SNIFF_CTRL_TYPES      (MAC_BASE + 0x104u)
+#define SNIFF_CTRL_TYPES      (MAC_BASE + 0x104u + MAC_SHIFT)
 #define SNIFF_CTRL_TYPES_MASK 0xffff0000u
 
 /* The slot's words, less for each slot, in hal_mac_tx.o's two blocks: the queue's, then the PPDU's. */
 #define TX_QUEUE_STEP 0x10u
+#ifdef RADIO_MAC_C5
+#define TX_PPDU_STEP  0x78u
+#define TX_PPDU_TOP   0x14b4u /* slot 0's, so that its TX_RESP is the ESP32-C5's hal_attenna_init's first word; the other
+                                 fields' offsets in the block are the ESP32-C6's, not yet held to the C5's sending */
+#else
 #define TX_PPDU_STEP  0x74u
+#define TX_PPDU_TOP   0x1488u
+#endif
 /*
  * The slots their start writes, eight: their hal_he_clr_multi_bssid and hal_attenna_init walk slot 0 to slot 7.
  */
@@ -105,7 +132,7 @@
 #define TX_MPLEN(s)    (TX_QUEUE(s) + 0x04u) /* whose bit 3 the HE mplen uses, and a legacy frame clears */
 #define TX_EDCA(s)     (TX_QUEUE(s) + 0x08u) /* the access class's AIFSN, backoff and lifetime */
 #define TX_PLCP0(s)    (TX_QUEUE(s) + 0x0cu)
-#define TX_PPDU(s)     (MAC_BASE + 0x1488u - (s) * TX_PPDU_STEP) /* PLCP1 first, then the slot's PPDU words */
+#define TX_PPDU(s)     (MAC_BASE + TX_PPDU_TOP - (s) * TX_PPDU_STEP) /* PLCP1 first, then the slot's PPDU words */
 #define TX_PLCP1(s)    (TX_PPDU(s) + 0x00u)
 #define TX_PROT(s)     (TX_PPDU(s) + 0x04u) /* the protect threshold of hal_he_set_tx_protection */
 #define TX_PWR(s)      (TX_PPDU(s) + 0x24u) /* the frame's power and its response's, from libphy; see mac.c */

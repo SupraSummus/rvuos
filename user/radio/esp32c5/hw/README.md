@@ -1,9 +1,8 @@
 # The ESP32-C5's radio hardware
 
 What is known of the ESP32-C5's modem, a file a subject.
-The repository has no C5 radio code yet;
-these files gather what Espressif's libraries say of the chip, ahead of it.
-Every fact here is static: nothing ran on a C5.
+`phy.md`, `rftest.md` and `regs.md` gather what Espressif's libraries say of the chip, all of it static;
+this file's sections from "The modem's frame, measured" on say what runs on the board answered.
 
 | File | Subject |
 |---|---|
@@ -20,7 +19,7 @@ A fact says where it comes from and how sure it is, with the labels of the C6's 
 **known**, a source names it, an ESP-IDF header, a `libphy` debug string or a library function's name,
 or a named function writes the value;
 **inferred**, the role of a library's loop, a print string or a name says it;
-**measured**, a run on the board answered it, of which there is none here;
+**measured**, a run on the board answered it;
 and **unknown**, or a hypothesis, said as one.
 A value said to be written by a function is that function's, read from its code;
 what the value means is **inferred** unless a source names it.
@@ -127,3 +126,110 @@ Queues 4 to 10 share one group, at 0x600A54B0 on the C5 and 0x600A5488 on the C6
 The other queue words, PLCP0 and the CONF words at 0x600A4CB0–0x600A4D6C, are where the C6 has them.
 So are the Wi-Fi MAC's other words, the BT AGC's, the 802.15.4 baseband's, and the PHY's CCA, noise-floor and RSSI words:
 70 functions present in both chips' libraries touch the same addresses.
+
+## The modem's frame, measured
+
+The kernel gives a program the modem as one frame, 0x600A0000 to 0x600B0000, as on the ESP32-C6.
+Each block ends, or repeats, with a word that reads as a date, 0x0YYMMDDn, as the ESP32-C6's do;
+on the ESP32-C5 most are of 2024, where the ESP32-C6's are of 2020 to 2022.
+Measured on one board, ESP32-C5HF4 v1.0, by a probe in machine mode with the modem's clocks forced on,
+and again by `prog/frame.c` from user mode, which found the same words in each block the boot leaves clocked:
+
+| From | Block | Date word, at | Repeats every | As on the ESP32-C6 |
+|---|---|---|---|---|
+| 0x600A0000 | FECOEX | 0x02411050, 0x54 | 0x80 | the C6's date is at 0x3FC |
+| 0x600A0400 | FEDATA | 0x02411280, 0x88 | 0x100 | moved |
+| 0x600A0800 | FECTRL | 0x02412070, 0xE0 | 0x100, to 0x600A0C00 | moved |
+| 0x600A0C00 | not known, new | 0x02411280, 0x54 | 0x80 | none there |
+| 0x600A1000 | btmac | 0x02408090, 0x1FFC | | the same place |
+| 0x600A2000 | the BT baseband | 0x02412050, 0x1FC | 0x200, to 0x600A2800 | the same place |
+| 0x600A2800 | btagc | 0x02401220, 0x108 | 0x200 | the same place |
+| 0x600A2C00 | zbbb, the 802.15.4 receiver | 0x02411070, 0xF8 | 0x100 | the same place |
+| 0x600A3000 | the 802.15.4 MAC | 0x00240425, 0x18C | | the C6's at 0x184 |
+| 0x600A4000 | the Wi-Fi MAC, four blocks of 1 KiB | 0x024112xx and 0x02412040, 0x3F8 of each | | the same place |
+| 0x600A5000 | 5 KiB of words, all other than zero, read only with the clocks on | | | the C6's key table is at 0x5800 |
+| 0x600A7000 | agc, bbtx, nrx and bb, of 1 KiB each | 0x024112x0 and 0x12410261, 0x3FC of each | | bb has a date now |
+| 0x600A8000 | brx | 0x02305101, 0x384 | | the same place |
+| 0x600A8400 | not known, new | 0x02210310, 0x154 | 0x200 | none there |
+| 0x600A8800 | the modem's ETM | 0x20231228, 0xA0 | 0x100 | the same place |
+| 0x600A9000 | the dump engine | 0x02202221, 0x1C | 0x20, to 0x600A9800 | the C6's repeats every 0x40 |
+| 0x600A9800 | not known | 0x02401090, 0xCC | 0x100 | the C6's is at 0x600A9400 |
+| 0x600A9C00 | MODEM_SYSCON | 0x02410160, 0x28 | 0x40 | the C6's is at 0x600A9800; ESP-IDF's `modem/reg_base.h` |
+| 0x600AD000 | the MAC's power and timers | 0x02208080, 0x6C | 0x80, to 0x600AD800 | |
+| 0x600AD800 | the Wi-Fi MAC's timer, two blocks of 1 KiB | 0x02411280, 0x3F8 of each | | the C6's at 0x600AD000 |
+| 0x600AF000 | MODEM_LPCON | 0x02410170, 0x4C | 0x80 | the C6's date at 0x2C; ESP-IDF's `modem/reg_base.h` |
+| 0x600AF400 | not known | 0x02203141, 0xE4 | 0x100 | the same place and date |
+| 0x600AF800 | i2c_mst, the analog I2C's master | 0x02411290, 0x3C | 0x40 | the C6's date at 0x34 |
+| 0x600AFC00 | i2c_mst's command memory | | | the same place |
+
+- **Before the clocks.** Read cold, the blocks of 0x600A2000 to 0x600A3000, 0x600A5000 to 0x600A6400,
+  0x600A8000, 0x600AD000 to 0x600AD800 and 0x600AFC00 each took 33.6 million cycles a KiB, about 0.68 ms a word,
+  the bus giving up on them, and read zero.
+  A reset of the chip leaves the modem's clocks as the image before left them, so a run after the probe found them on.
+- **The empty.** 0x600AA000 to 0x600AD000 and 0x600AE000 to 0x600AF000 read zero, answered at once.
+
+## The Wi-Fi MAC beside the ESP32-C6's
+
+Inferred from the two chips' `libpp.a` and ROMs, the functions both have, each one's accesses to the MAC taken in order
+and paired with the other chip's:
+
+- Most of the MAC's registers the ESP32-C6's driver names lie where they do on the ESP32-C6: 98 of the 152 its image reaches.
+- A run of them lies one word further on, from the C6's 0x600A40F8 to 0x600A416C, at 0x600A40FC to 0x600A4170,
+  and another three words further, the C6's 0x600A4440 to 0x600A4458 at 0x600A444C to 0x600A4464.
+- The MAC's timer block, the C6's 0x600AD000, lies at 0x600AD800, most words at the same offsets.
+- The rest are fewer than twenty words, each to be found by the same pairing before the MAC's start uses it.
+- The timer block's words the driver uses: the TSF's control at 0x600AD858, timer 30 at 0x600AD830,
+  the slow clock's cycle at 0x600AD878, and the power status and its clear at 0x600AD8B8 and 0x600AD8BC.
+- A TX slot's busy bits are 0xE000, and the sniffer's filter of other frames sits eight bits higher than the ESP32-C6's.
+- The interrupt's words are the enable at 0x600A4C40, the MAC's enable word as on the ESP32-C6, the raw at 0x4C44 and the status at 0x4C48.
+- The control header the MAC writes before a received frame is 64 bytes, the MAC's version 3, ESP-IDF's `esp_wifi_rxctrl_t`:
+  the signal's length at byte 56 and the state at 60, where the ESP32-C6's header is shorter;
+  measured too, as `prog/listen.c` reads beacons whole by it.
+- `chm_set_current_band` writes the low byte of 0x600A4C94, 0x20 for 2.4 GHz and 0x17 for 5 GHz, which the driver does not yet.
+
+## The PHY on libphy.a
+
+Measured with `prog/phyup.c`, `libphy.a` of version `108,cdfe9643` (Dec 2 2025),
+esp-phy-lib's commit 3d57415a, which `tools/esp-fetch.py` fetches for the code;
+`phy.md` reads another, of the commit 20f1db05, whose band byte turns at 4000 MHz where this one's turns at 3001:
+
+- Its full calibration, `register_chipv7_phy`, returns 0 after 1.17 s, most of it the kernel's report of each feigned access.
+- It tunes 2412 MHz, channel 1, in 2.2 ms, and 5180 MHz, channel 36, in 2.7 ms, `phy_change_channel` taking the centre in MHz;
+  `phy_set_chanfreq` takes 3001 MHz and up for the 5 GHz band, a flag in `phy_param`.
+- The writes it makes outside the frames, feigned, in order: `PMU_RF_PWC` to 0xF3000000, 0xFB000000, 0xFF000000 and 0xFF800000,
+  the last `XPD_CKGEN5G`; `IMM_HP_CK_POWER` to 0x10000000; PCR's `SARADC_CONF` to 4 then 5, `TSENS_CLK_CONF` to 0x00500000,
+  and the reserved word at 0x6009614C to 0x0A; and `LP_AON_SAR_CCT`'s top three bits between 4 and 2, ending at 2,
+  where the kernel sets 4, as the ESP32-C6's ends; which the power detector's calibration measures with is open.
+- It reads the eFuse's words from 0x600B4844 to 0x600B4854, the MAC address and the PA's DC calibration, `phy_pa_dc_code_set`.
+
+## The ROM
+
+The board's ROM is the v1.0 revision's, `esp32c5_rev100_rom.elf` of Espressif's ROM ELFs,
+whose code matched the board's byte for byte where it was read back; ESP-IDF's ROM linker scripts of v5.5.4 match it,
+but for `esp32c5.rom.eco3.ld`, a later revision's.
+Its `ets_delay_us` counts in `mcycle`, which user mode cannot read, so a program has its own, `delay.c`.
+With `mcounteren` set, user mode reads `cycle` and `time`, measured by a probe in machine mode; rvuos sets neither.
+
+## The SPLL
+
+Measured with a probe in machine mode and the kernel's boot, which says the clock it found and the one it set:
+the SPLL's dividers, in the analog block 0x66 that the modem's I2C master reaches by its second command word,
+keep what was set before through a reset and the ROM's boot from flash.
+The board's boots found them as for a 40 MHz crystal, the reference divided by 12, so the SPLL ran at 576 MHz
+on the board's 48 MHz crystal and PLL_F160M at 192; ESP-IDF's settings for 48 MHz, which the ROM's download mode leaves, give 480.
+The master's words read zero and take no write until its clock is forced on, MODEM_LPCON's 0x01C bit 2,
+whatever its enable and its gating maps say; the kernel forces it for the change, see `kernel/board/esp32c5/timer.c`.
+
+## The modem's power block behind a TEE word of its own
+
+The TEE controller's HP permission words run past the last its register header names, the bit scrambler's at 0x60098140,
+to the SLC host's at 0x60098158, as ESP-IDF's `soc/apm_defs.h` numbers them.
+The modem's power, `APM_TEE_HP_PERIPH_MODEM_PWR` at 0x60098148, covers MODEM_PWR0 and MODEM_PWR1:
+the MAC's power and timer block at 0x600AD000, and MODEM_LPCON with the analog I2C master at 0x600AF000.
+Measured: left at its reset value, TEE mode alone, the word let machine mode read LPCON's date, 0x02410170,
+and user mode read zero there, with no fault, its writes lost.
+So `libphy.a` calibrated without reaching an analog block, and the MAC heard nothing;
+with the word granted, as the kernel now does, `prog/listen.c` hears what a computer beside the board hears, on both bands.
+
+The words 0x600A0894 to 0x600A08A8 are the pbus's readback, three nine-bit fields a word,
+whose address and shift `phy_pbus_rd_addr` gives for each of its eleven selectors.

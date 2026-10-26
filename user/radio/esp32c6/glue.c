@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 #include "lib/libc.h"
-#include "osi.h"
+#include "osi.h" /* and drv.h, with the board's radio.h */
 
 /* --- libc, beside user/lib/libc.c's. --- */
 
@@ -216,9 +216,9 @@ int phy_printf(const char *fmt, ...);
     }
 LIB_PRINTF(phy_printf, "phy")
 
-/* The ESP32-C6's crystal is 40 MHz. */
+/* The crystal, 40 MHz on the ESP32-C6 and 48 on the ESP32-C5, as the board's radio.h says. */
 int rtc_clk_xtal_freq_get(void);
 int rtc_clk_xtal_freq_get(void)
 {
-    return 40;
+    return RADIO_XTAL_MHZ;
 }

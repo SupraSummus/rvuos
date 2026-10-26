@@ -83,9 +83,10 @@ $(BUILD)/$(RADIO_ESP)/esp_wifi_regulatory.o: $(RADIO_ESP_INIT)
 # the network process, its clients, and the root task's half of both, system.c,
 # which it builds when the program is the Wi-Fi station and a network is named.
 # The logger is linked, though this root task never builds it.
+# The ESP32-C5's root task is the same file, built against that board's devices.h and radio.h.
 RADIO_ESP_NET  := $(addprefix $(BUILD)/user/wifi/,netproc.o net.o sock.o system.o client.o echo.o clock.o sntp.o logger.o)
 RADIO_ESP_ROOT := $(BUILD)/$(RADIO_ESP)/root.o
-$(BUILD)/user-wifi-esp32c6.elf: $(RADIO_ESP_ROOT) $(RADIO_ESP_NET) $(LIB_OBJ) $(USER_COMMON) \
+$(BUILD)/user-wifi-esp32c6.elf $(BUILD)/user-wifi-esp32c5.elf: $(RADIO_ESP_ROOT) $(RADIO_ESP_NET) $(LIB_OBJ) $(USER_COMMON) \
                                 $(BUILD)/user/tracer/trace.o $(BUILD)/user/user.ld tools/no-globals.py
 	tools/no-globals.py $(RADIO_ESP_NET) $(LIB_OBJ) $(BUILD)/user/tracer/trace.o
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(RADIO_ESP_ROOT) $(RADIO_ESP_NET) $(LIB_OBJ) \
@@ -101,17 +102,21 @@ RADIO_PROG_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(RADIO_ESP_SRC)) $(RADIO_ESP_DAT
 RADIO_PROG_HEAP := $(addprefix $(BUILD)/$(RADIO_ESP)/,heap.o osi.o)
 $(BUILD)/$(RADIO_ESP)/prog/%.o: CFLAGS += -I$(RADIO_ESP)
 
+# drv.h, which the linker scripts read, takes the board's radio.h.
+$(BUILD)/$(RADIO_ESP)/flash.ld $(BUILD)/$(RADIO_ESP)/flash-prog.ld: KERNEL_INC += -Iuser/board/$(BOARD)
 $(BUILD)/$(RADIO_ESP)/flash-prog.ld: $(RADIO_ESP)/flash.ld.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ARCHFLAGS) -E -P -x assembler-with-cpp $(KERNEL_INC) -Iinclude -DDRV_RAM_BASE=0x40870000 \
 		-DDRV_RAM_SIZE=0x00010000 -MMD -MP -MT $@ $< -o $@
 
+ifneq ($(BOARD),esp32c5)
 $(BUILD)/radio-%.elf: $(BUILD)/$(RADIO_ESP)/prog/%.o $(RADIO_PROG_OBJ) $(LIB_OBJ) $(BUILD)/$(RADIO_ESP)/flash-prog.ld
 	@! $(NM) -u $(filter-out $(RADIO_PROG_HEAP),$(filter $(BUILD)/$(RADIO_ESP)/%,$(RADIO_PROG_OBJ)) $<) \
 		| grep -E ' (osi_(m|c|re)alloc|os_(m|z)alloc|malloc|calloc)$$' \
 		|| { echo "$@: the program's own code calls an allocator" >&2; exit 1; }
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(RADIO_ESP)/flash-prog.ld $(foreach s,$(RADIO_ESP_ROM),-Wl,-T,$(s)) \
 		$< $(RADIO_PROG_OBJ) $(LIB_OBJ) -o $@
+endif
 
 $(BUILD)/radio-%.bin: $(BUILD)/radio-%.elf
 	$(OBJCOPY) -O binary $< $@
@@ -127,9 +132,9 @@ radio: $(BUILD)/kernel-wifi-esp32c6.bin $(if $(PROG),$(BUILD)/radio-$(PROG).bin)
 		$(foreach e,$(BUILD)/radio-$(PROG).elf $(BUILD)/kernel-wifi-esp32c6.elf $(PHYBLOB_ROM_ELF),--symbols $(e)) -- \
 		$(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) --flash $(RADIO_ESP_AT):$(BUILD)/radio-$(PROG).bin \
 		--text $(RADIO_ESP_INPUT_AT):$(or $(RADIO_CONFIG),/dev/null) $(BUILD)/kernel-wifi-esp32c6.bin
-else
+else ifneq ($(BOARD),esp32c5)
 radio:
-	$(error the radio's programs run on an ESP32-C6: make BOARD=esp32c6 radio PROG=name)
+	$(error the radio's programs run on an ESP32-C6 or an ESP32-C5: make BOARD=esp32c6 radio PROG=name)
 endif
 
 # The radio's files on the host under the sanitizers, which fetch nothing, so make check runs them.
