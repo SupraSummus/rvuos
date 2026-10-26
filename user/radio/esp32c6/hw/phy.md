@@ -37,6 +37,20 @@ and says which.
   in the `i2c_mst` window's end; `phy_i2c_master_cmd_mem_init` programs all thirty and
   `phy_i2c_master_mem_txcap` its word at 0x600AFC04 alone. What the command words say is not known.
 - Membership: **known** (window names), **inferred** for which word gates which domain.
+- The modem's clocks by protocol: the RF test library's `phy_set_clk_conf`, see `rftest.md`, writes four settings of
+  `MODEM_SYSCON`'s `CLK_CONF` 0x600A9804 and `CLK_CONF1` 0x600A9814 (known, its disassembly and pseudo-C),
+  which ESP-IDF's `modem_syscon_reg.h` reads as these clocks:
+  - Wi-Fi, around its receive: `CLK_CONF` 0 and `CLK_CONF1` 0x167FF, the Wi-Fi baseband's clocks, its MAC's and APB's
+    (bits 0 to 10), the front end's 80 and 160 MHz (13, 14) and its APB's (16);
+  - BLE: 0 and 0x76000, the front end's 80 and 160 MHz and APB's, and BT's APB and BT's own (17, 18);
+  - 802.15.4: `CLK_CONF` 0x1800000, `CLK_ZB_APB_EN` and `CLK_ZB_MAC_EN` (23, 24), beside BLE's `CLK_CONF1`;
+  - any other: every bit of `CLK_CONF` and `CLK_CONF1` 0x7FFFF, as each test leaves it.
+  Its `rftest_open_clk` also sets every bit of `CLK_CONF_POWER_ST` 0x600A980C and of `MODEM_LPCON`'s
+  `CLK_CONF`, `CLK_CONF_FORCE_ON` and `CLK_CONF_POWER_ST` 0x600AF018 to 0x600AF020.
+- `PMU_RF_PWC` 0x600B0154's bits 28 to 31, which `phy.c` names the analog I2C buses' powers after ESP-IDF:
+  the RF test library's `i2c_xpd_test` clears the four for a second, sets them again,
+  and reads block 0x63's register 0, block 0x62's register 0 or block 0x6B's register 2 ten times,
+  printed as `i2c_sdm`, `i2c_rfpll` and `i2c_rftx` (known, its pseudo-C): a second source that the bits power those buses.
 
 ### Bias and LDO
 
@@ -125,6 +139,14 @@ Measured with `prog/scan.c`:
 - `AGC_2`, 0x600A702C (known, `libphy`'s `phy_force_rx_gain`): bits 24 to 31 a gain's index,
   and bit 23 set holds the receiver there, the AGC choosing no more; bits 8 to 14 the gain table's last index,
   which `set_rx_gain_table` writes, 79 on the board. `drv_phy_rx_gain` in `phy.c` holds it.
+  The RF test library's `force_rx_gain(force, gain, bt)` writes the same two fields where `bt` is 0
+  (known, its pseudo-C), a second source; its `rx_max_gain(0)` reads bits 8 to 14 as the table's last index too.
+- Bluetooth's and 802.15.4's receiver has the same pair in `btagc` 0x600A2840: `force_rx_gain` with `bt` set writes the gain
+  into its bits 24 to 31 and `force` into bit 23 (known, its pseudo-C).
+  It does so after `phy_dis_hw_set_freq_1`, which stops the hardware's frequency setting,
+  with 0x600AF4B4's bit 0 set to `force` and `bt` both, see `README.md`, "The block at 0x600AF400",
+  and `bt_rx_force(force, bt)` between, see "Transmit"; then it waits 100 us and calls `phy_en_hw_set_freq`.
+  `rx_max_gain(1)` reads `btagc` 0x600A2850's bits 14 to 20, the field `btbb.c`'s `bt_agc_gain_max` writes.
 - The dump engine's word carries the index in bits 20 to 26: held, every word read the index held.
   Its bit 27 is set for one sample at a time, a gain of 207 being 79 with it,
   and 32 samples later, at 80 MS/s, the gain is back at 78, the idle one, in all 34 seen: the AGC's restart, as a hypothesis.
@@ -241,6 +263,14 @@ So the transmitter has no low-pass of note within 40 MHz in the loopback's path,
 Tones at +37.5 and +39.4 MHz of these runs put the DAC's image at 2395 to 2397 MHz, below the band,
 at about the leak's level, before `drv_phy_tone_fits` took steps of 512 and up out.
 
+The RF test library moves these registers as Espressif uses them (known, the pseudo-C of the functions named), though nothing here was measured.
+Its `tx_cont_cfg`, for continuous sending, writes block 0x67's registers 0x0C and 0x0D, and 0x0E and 0x0F, from two default bytes of its own:
+mode 1 adds 10 to the first pair and 7 to the second, each held at 0x3F, and mode 2 takes 10 from the first pair, held at 0, and leaves the second.
+libphy's `phy_11p_set`, which `phy.c` takes over, writes registers 4 to 7 and 0x0C to 0x0F alike for 802.11p's narrower channels,
+from one code scaled by the bandwidth.
+So Espressif sets these four beside the receiver's filter codes 4 and 5, which "The receiver's gain and filter" measured;
+what 0x0C to 0x0F filter, if not the transmitter, stays open.
+
 ### BBPLL
 
 - Analog I2C: `i2c_bbpll` 0x66, host 0 -- `phy_i2c_check`'s name; IDF's `regi2c_bbpll.h` `I2C_BBPLL`
@@ -300,6 +330,35 @@ at about the leak's level, before `drv_phy_tone_fits` took steps of 512 and up o
   at 0xDC/0xDE/0xE0 and 0xDD/0xDF/0xE1, one pair a channel. The fields and what they correct have no label,
   meaning **unknown**; the library's print argument is `phy_param`'s halfword 0x10 bit 7, also unlabelled.
 - pbus: `rftx` (4,1), (4,2), (5,1); `dco` (2,1), (3,1), (2,2), (3,2).
+- `FEDATA_GAIN_CHAN` 0x600A0410's fields, as the RF test library writes them (known, the pseudo-C of the functions named):
+  - bit 22 forces the digital gain and bits 8 to 15 hold it, `force_dig_gain(en, gain)`, which also clears bits 0 to 7;
+  - bit 23 forces the power index and bits 16 to 21 hold it, `set_tx_pwr_index` from libphy's `phy_get_pwr_index` of the rate;
+  - `WifiTxStart` and `esp_tx` clear bit 23 when they end.
+- `FECTRL_TXRX_OFF` 0x600A0910's bits 8 to 13, which the RF test library moves to force the radio on
+  (known, the pseudo-C of the functions named; their roles inferred from the names):
+  - `bt_rx_force(en, bt)` sets bits 12 and 13 where both are set and clears them otherwise,
+    then sets or clears `btagc` 0x600A28A0's bits 30 and 31 with `en`,
+    then writes bits 8 and 9 as 2 and then 3, and back to 0 where `en` is clear;
+  - `force_txon_mode(on, bt, index)` sets bits 12 and 13 with `on` for Bluetooth,
+    with 0x600AF4B4's bit 0 and `btagc` 0x28A0's bits 30 and 31 beside them,
+    stops and restarts the hardware's frequency setting unless `FECOEX_FREQ_SET_CONF` 0x600A00C0's bit 26 is set,
+    and forces the power index through libphy's `phy_force_pwr_index`, 0x20 above Wi-Fi's for Bluetooth;
+  - `txon_set(on)` sets bits 12 and 13, writes bits 8 and 9 as 2, sets bits 10 and 11, and clears all six where `on` is 0.
+  The ROM's `set_rxclk_en` writes the word's bits 14 and 15 together and its `set_txclk_en` bits 16 and 17 (known, the ROM's disassembly at 0x4000528c and 0x40005268),
+  so the bits 14 and 15 `rxiq_cal_init` raises, "Corrections" below, are the receive clock's enable, as a hypothesis from that function's name.
+- `BBTX_CHAN14` 0x600A7400's fields, as the RF test library writes them (known, the pseudo-C of the functions named):
+  - bits 13 and 14, which libphy's `chan14_mic_cfg` writes for channel 14:
+    `dig_11b_filter_sel` writes its argument there and prints it as 11b's digital filter, and `wifitxout_func` sets 1 for an 11b rate,
+    so the field selects 11b's transmit filter, channel 14's being Japan's narrower mask (inferred);
+  - bits 0 to 6 a scrambler seed and bit 7 its force, `seed_vs_rate`, from a table by the rate, 0x6B where the table has none,
+    or 0x2A, 0x25 and 0x12 in its FCC mode (the seed's role inferred from the name);
+  - bit 21, which `WifiTxStart` clears before it sends, beside bit 20 of `bbtx` 0x600A7418.
+- `bbtx` 0x600A7414 and 0x600A7418: `remove_11b_4p8G_spur(en, a, b)` writes `b` into bits 8 to 14 and `a` into bits 15 to 18 of both,
+  sets bit 19 of both, and puts `en` into 0x7414's bit 0 (known, its pseudo-C):
+  a notch for 11b against a spur near 4.8 GHz, by its name, the fields' meaning not known.
+- Analog I2C `i2c_ulp` 0x61, host 0: the RF test library's `pa_reg_opt(rate, v)` writes register 7's bit 5 as the inverse of the rate code's bit 0
+  and register 0x0A's bits 5 to 0 as `v`, 0x28 from `WifiTxStart` (known, its pseudo-C); `esp_tx` reads register 0x0A's field first.
+  A PA option by its name; what the two fields set is not known.
 
 ### Receive
 
@@ -312,6 +371,23 @@ at about the leak's level, before `drv_phy_tone_fits` took steps of 512 and up o
   0x8060/0x807C and `BRX_11B_3` 0x8004; MMIO `bb` 0x600A7C00: `BB_INIT_6/11`. Windows **known**, names
   the driver's (**inferred** from `rx_11b_opt`, `phy_disable_low_rate`, `bb_reg_init_new`).
 - pbus: `rfrx` (0,1), (0,2); `bb` (1,1), (1,2).
+- `AGC_0` 0x713C's bits 18 to 24 and `AGC_1` 0x7094's bits 2 to 8: the RF test library's `rx_init_gain(n)` writes the same `n` into both
+  (known, its pseudo-C), and its name makes the two the receiver's initial gain index (inferred);
+  `phy.c` writes `AGC_0`'s field with the gain table's last index, held at 0x4C, which agrees.
+- `AGC_NOISE_FLOOR` 0x7018, as the RF test library uses it (known, the pseudo-C of the functions named; the roles inferred from the names):
+  - `check_noise_floor` clears bit 25 and sets bit 23, waits for bit 24, and reads `agc` 0x600A7050's low 10 bits as a negative number,
+    held between -392 and -352, as a hypothesis quarters of a dBm, -98 to -88 dBm;
+  - `set_noise_floor` writes such a number into bits 5 to 14 and sets bit 4, a floor of its own in place of the measured one;
+    the console's `set_noise_floor` writes -352;
+  - libphy's `noise_floor_auto_set_new`, which `phy.c` takes over, sets bits 23 and 28.
+- The ROM's `read_hw_noisefloor` reads `AGC_GAIN_SAR` 0x708C.
+  The ROM's `phy_disable_cca` sets `agc` 0x600A7074's bits 19 and 21 and clears 20 and 22, and its `phy_enable_cca` clears 19 and 21
+  (known, the ROM's disassembly, followed from the console's two commands).
+  libphy's own `phy_disable_cca_new`, which the test's sender calls, writes a word of the Wi-Fi MAC's instead, see `wifi-mac.md`.
+- A receive spur's notch: the RF test library's `rx_spur_remove(f, en, v)` writes `bb` 0x600A7C14's bits 0 to 12 from `f / 80`,
+  its bits 3 and up into bits 0 to 6 and 10 to 12 and its low three bits into bits 7 to 9,
+  and `agc` 0x600A71D4's bit 18 with `en` and bits 10 to 17 with `v` (known, its pseudo-C).
+  The init data's bytes 76 to 80, see `rftest.md`, name a spur's frequency as a ratio, with a bit a channel; the same notch, as a hypothesis.
 - `phy_param`: `RXIQ` 0xD4/0xD6; `RXDC_RFRX_BT` 0x132/0x134, `RXDC_RFRX_WIFI` 0x14E/0x150,
   `RXDC_CHAN_WIFI` 0x172/0x174 (**known** labels); 0x16E is unlabelled (**unknown**); the gain-table
   counts 0x120/0x121 and the temperature 0x198 (**inferred** from the gain table). The offsets
@@ -355,9 +431,12 @@ at about the leak's level, before `drv_phy_tone_fits` took steps of 512 and up o
   and folds the mismatch back, over two rounds; `rfcal_rxiq_new` raises `FEDATA_REG_SET3`'s bit 29 and lowers its
   bit 30 around a tone and the correction; and `get_rfcal_rxiq_data_new` repeats the reading up to four times and
   averages. The ROM's `rxiq_set_reg` [0x40005214] holds the high byte to `[-0x1f, 0x1f]` and the low to
-  `[-0x3f, 0x3f]` (through the ROM's `get_data_sat`) and writes it into `FEDATA_REG_SET3`'s high field (mask
-  0x3f0000, bits 12..15 and 17..23 cleared) or low field (mask 0x1fc00, bits 14..20 cleared). Bits 29 and 30
-  (and what each field corrects) have no label, meaning **unknown**.
+  `[-0x3f, 0x3f]` (through the ROM's `get_data_sat`) and writes it into `FEDATA_REG_SET3`'s high field, bits 16..21
+  (`lui 0x3f0`, mask 0x3F0000), or its low field, bits 22..28 (`lui 0x1fc00`, mask 0x1FC00000, shifted left 22).
+  An earlier reading here took the second `lui`'s immediate unshifted, mask 0x1fc00, bits 10..16; the ROM's disassembly,
+  read again, and the RF test library's `force_iq_set`, see "Corrections" below, both give bits 22..28.
+  By `force_iq_set`'s print the 6-bit field is the receive IQ gain and the 7-bit one its phase (inferred).
+  Bits 29 and 30 have no label, meaning **unknown**.
 - The receive IQ calibration's block: `set_rx_gain_cal_iq_new` sets the loopback gain and the loopback transmit
   IQ pair, runs the ROM's `pbus_rx_dco_cal`, then steps the receive gain a sixteenth at a time while the
   estimate's `FEDATA_IQ_EST_MAG` decides -- below 0x1000 the gain falls, above 0x20000 it rises and the loopback
@@ -370,6 +449,19 @@ at about the leak's level, before `drv_phy_tone_fits` took steps of 512 and up o
   bit 30 and bit 14, and at the end lowers bit 29 and rises bit 30 and bit 14, so the block mirrors
   `rfcal_rxiq_new`'s bits 29 and 30. `FECTRL_TXRX_OFF`'s two bits and the four `FEDATA_REG_SET3` bits have no
   label, meaning **unknown**.
+- `FEDATA_REG_SET3` 0x600A0450, as the RF test library's `force_iq_set(force_en, tx_en, iq_gain, iq_phase)` writes it,
+  the four names its own print's (known, its pseudo-C):
+  - every call sets bits 13 and 29;
+  - with `tx_en`, bits 0 to 5 take the gain, bits 6 to 12 the phase, and bit 14 is set where `force_en` is clear;
+  - without, bits 16 to 21 take the gain, bits 22 to 28 the phase, and bit 30 is set where `force_en` is clear.
+  So bits 14 and 30, which the two calibrations lower while they run and raise at their end, read as "not forced",
+  the correction taken from elsewhere, as a hypothesis the gain memory's `TXIQ` and the receive side's own;
+  and the receive phase's field lies at bits 22 to 28, where the ROM's `rxiq_set_reg` writes its low byte, see above.
+  Its `loop_mode` calls `force_iq_set(1, 1, 0, 0)` and `force_iq_set(1, 0, 0, 0)` before the loopback, zeroing both corrections.
+- The estimate's words the RF test library reads, between the ROM's `rom_iq_est_enable` and `rom_iq_est_disable` (known, its disassembly):
+  `rxiq_get_pwr` reads 0x600A0478 to 0x600A0484, `dc_iq_est_test` 0x600A0488 to 0x600A0498,
+  `get_iq_est_pwr` 0x600A0490 alone, and `ram_get_corr_power` 0x600A0478 to 0x600A0490;
+  0x600A0494 and 0x600A0498 are in none of the library's calibrations above.
 
 ### Sensors
 
@@ -389,6 +481,11 @@ at about the leak's level, before `drv_phy_tone_fits` took steps of 512 and up o
 - The driver's own read and calibration: `tsens_dac_to_index`, `tsens_dac_cal_new`, `ram_tsens_temp_read_new`
   (the library's weak `phy_get_tsens_value` is the same read), `tsens_temp_read_new` and `get_temp_init_new`;
   the library's `phy_set_tsens_range` is left out, nothing calling it.
+- The power detector, as the RF test library's `pwdet_tone_test` drives it (known, its pseudo-C):
+  it sets the tone generator's `FEDATA_TX_TONE0` 0x600A0420 bit 18, the tone on, sets `FECTRL_PWDET_CONF0` 0x600A0810's bit 0,
+  waits until `FECTRL_PWDET_CONF1` 0x600A0814's bits 14 to 16 all read 1, and, asked to, clears bit 18 again;
+  the console's `read_sar_dout` then reads the SAR's words.
+  Its `phy_get_tx_rate` returns `FECTRL_PWDET_CONF1`'s bits 24 to 30, a rate by its name: the same word holds the detector's state and, as a hypothesis, the rate it measured the transmitter at.
 
 ## Connections seen
 
@@ -572,6 +669,32 @@ esp32c6.rom.phy.ld.
 Source: `phy_i2c_check`'s disassembly and strings, beside the IDF headers (Apache-2.0: the register
 names are the facts).
 
+### The analog I2C's writes of the RF test library
+
+The RF test library writes these registers with constant arguments (known, its pseudo-C), beside libphy's and the ROM's own above.
+A name is the library's variable or print, and its meaning is inferred from that name alone; nothing was measured.
+
+| block, host | register, bits | written | by | its name |
+|---|---|---|---|---|
+| `i2c_ulp` 0x61, 0 | 7, bit 5 | the inverse of the rate code's bit 0 | `pa_reg_opt`, from `WifiTxStart` and `esp_tx` | a PA option |
+| `i2c_ulp` 0x61, 0 | 0x0A, bits 5 to 0 | 0x28; read first by `esp_tx` | `pa_reg_opt` | a PA option |
+| `i2c_dig_reg` 0x6D, 0 | 4, bits 4 to 0 | lowered by 4, and back | `wifi_rx_opt`, `phy_rx_opt_cfg` | `rx_rtc_reg` |
+| `i2c_bias` 0x6A, 1 | 0, bits 7 to 4 | lowered by 2, and back | the same | `rx_dreg_1p1` |
+| `i2c_ulp` 0x61, 0 | 5, bit 6 | 1, and back | the same | `rx_ulp_code_en` |
+| `i2c_ulp` 0x61, 0 | 6, bits 7 to 0 | register 4's value less 0x14, and back | the same | `rx_ulp_code` |
+| `i2c_ulp` 0x61, 0 | 7, bit 5 | 0 at 2480 MHz, 1 when put back | the same | |
+| `i2c_bias` 0x6A, 1 | 0, bits 7 to 4 | a byte of the library's, printed `dreg_1p1=%d` | `xtal_freq_rx_cal` | `dreg_1p1` |
+| `i2c_dig_reg` 0x6D, 0 | 6, bits 4 to 0 | stepped up from 0x14 until the SAR's voltage passes `phy_param`'s first halfword times 111/98 | `phy_dig_ldo_cal` | the digital LDO |
+| `i2c_dig_reg` 0x6D, 0 | 7 | 0x9C, 0x9A, 0x98 | the tool's own command history, `wi`, see `rftest.md` | a regulator's trim, as a hypothesis |
+| `i2c_bbtop` 0x67, 1 | 0x0C to 0x0F | the default and a step, see "The transmitter's filter" | `tx_cont_cfg` | |
+| `i2c_bbtop` 0x67, 1 | 3, bits 2 and 3 | 0 | `phy_check_rssi_1m` | |
+
+`wifi_rx_opt` makes its changes only where the channel lies within 10 MHz of 2440 or 2480 MHz, 61 and 62 times the crystal's 40 MHz,
+and puts them back when it ends, then retunes the RF PLL's capacitance through `rfpll_cap_correct_new`.
+So it moves the digital regulators while the receiver sits on the crystal's harmonics, against their spurs, as a hypothesis.
+`i2c_bias` register 0's bits 7 to 4 are the same field `phy.c`'s bias set writes 0x0C to.
+`dreg_1p1` names it a 1.1 V regulator's setting.
+
 ### The pbus's addresses
 
 `libphy`'s `pbus_print` reads each address with `rom_pbus_rd(address, word)` and names the groups.
@@ -672,7 +795,7 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
 | MODEM+0x450 | 29, 30 | the receive IQ calibration's bits | `rfcal_rxiq_new` raises bit 29 and lowers bit 30 around the receive IQ mismatch's correction, and `rxiq_cal_init` does the same around its gain search, rising bit 13 and lowering bit 14 beside them and reversing all four at its end; no label names them | `rfcal_rxiq_new`'s and `rxiq_cal_init`'s disassembly | unknown |
 | FECTRL 0x910 | 14, 15 | `FECTRL_TXRX_OFF`'s receive IQ calibration bits | `rxiq_cal_init` rises both around its work and, where its third argument is clear, clears bit 15; no label names them | `rxiq_cal_init`'s disassembly | unknown |
 | phy_param+0xA4 | 10 | `param_flag`'s receive IQ bit | where set, `rxiq_cal_init` has run and returns at once, and it sets it at the end | `rxiq_cal_init`'s disassembly | inferred |
-| MODEM+0x450 | 16..21, 10..16 | the receive IQ correction's two fields | the ROM's `rxiq_set_reg` writes the correction's high byte into bits 16..21 (mask 0x3f0000, bits 12..15 and 17..23 cleared) and its low byte into bits 10..16 (mask 0x1fc00, bits 14..20 cleared); the field masks are the ROM's, meaning not known | the ROM's `rxiq_set_reg` [0x40005214] | unknown |
+| MODEM+0x450 | 16..21, 22..28 | the receive IQ correction's two fields | the ROM's `rxiq_set_reg` writes the correction's high byte into bits 16..21 (mask 0x3F0000) and its low byte into bits 22..28 (mask 0x1FC00000; read earlier, wrongly, as 0x1fc00, bits 10..16); the RF test library's `force_iq_set` names them the gain and the phase | the ROM's `rxiq_set_reg` [0x40005214], librftest's `force_iq_set` | inferred |
 | MODEM+0x478..0x484 | | `FEDATA_RX_IQ_EST2..5` | the estimate's four words `rxiq_get_mis_new` reads and crosses into the receive IQ mismatch; no label names them | `rxiq_get_mis_new`'s disassembly | unknown |
 | MODEM+0x705C | 31, 30, 28, 24, 19, 11, 10, 0..18 | `AGC_RFRX_SAT` | the receive saturation's word: `rfrx_sat_rst` raises bits 31, 30, 28, 24 and 19 with its argument and clears them where it is clear, raises bit 11 or bit 10, and clears bits 0..18; no label names it | `rfrx_sat_rst`'s disassembly | unknown |
 | MODEM+0x7068 | | `AGC_4` | written 0x404 outright by `rfrx_sat_rst` before `AGC_RFRX_SAT`; no label names it | the same | unknown |
@@ -787,14 +910,16 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
   third argument is set; the whole driver leaves the PHY prints out, so the covered path is that argument clear.
 - `FEDATA_REG_SET3` 0x600A0450's bits 29 and 30 and its two receive IQ correction fields: `rfcal_rxiq_new` and
   `rxiq_cal_init` move bits 29 and 30 around the receive IQ calibration, and the ROM's `rxiq_set_reg` writes the
-  correction's high and low bytes into bits 16..21 and 10..16; no header names them, and what they gate or correct
-  is not known. The library's `get_rfcal_rxiq_data_new` prints each reading where its third argument is set, left
+  correction's high and low bytes into bits 16..21 and 22..28, the RF test library's gain and phase;
+  no header names them, and what bits 29 and 30 gate is not known. The library's `get_rfcal_rxiq_data_new` prints each reading where its third argument is set, left
   out as above.
 - `FECTRL_TXRX_OFF` 0x600A0910's bits 14 and 15, and `FEDATA_REG_SET3`'s bits 13 and 14 beside the receive IQ
   calibration's 29 and 30: `rxiq_cal_init` rises the two `FECTRL_TXRX_OFF` bits around the block and clears bit 15
   where its third argument is clear, and moves the `FEDATA_REG_SET3` pair around the search, the same two bits
   `rfcal_txiq_new` names `FEDATA_REG_SET3_TXCAL` and `FEDATA_REG_SET3_TXIQ_DONE`; no header names any of them, and
   whether the two calibrations share the pair or it gates the front end's transmit-receive switch is not known.
+  The ROM's `set_rxclk_en` writes the same two `FECTRL_TXRX_OFF` bits, see "Transmit", which makes them the receive clock's;
+  the RF test library's `force_iq_set` sets `FEDATA_REG_SET3`'s bit 13 on every call and makes bit 14 "not forced", see "Corrections".
 - `i2c_txrf` 0x6B register 2's bits 3..0 and 7..4, `phy_param`'s `DCAP_STG1`/`DCAP_STG2` at 0xDC/0xDE/0xE0 and
   0xDD/0xDF/0xE1, and `phy_param`'s halfword 0x10 bit 7: `tx_cap_init_loop` and `rfcal_txcap_loop` scan the
   register for the value whose estimate magnitude is largest and keep each channel's pair in `phy_param`, and the
@@ -816,3 +941,9 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
   is always set there. What the three bits mean is not known.
 - `register_chipv7_phy`'s last device access, the ROM's `rom_i2c_readReg` on the RF PLL's SDM block 0x63, host 1,
   register 0, whose answer it discards: why it is read there, after the baseband PLL is taken down, is not known.
+- `i2c_bbtop` 0x67's registers 0x0C to 0x0F: the RF test library's `tx_cont_cfg` widens them for continuous sending and libphy's `phy_11p_set` scales them with registers 4 to 7,
+  see "The transmitter's filter", but no transmit low-pass was measured there; what they set is not known.
+- `FECTRL_PWDET_CONF1` 0x600A0814's bits 24 to 30, which the RF test library's `phy_get_tx_rate` returns beside the power detector's state bits 14 to 16:
+  what rate the word holds, and when, is not known.
+- `i2c_ulp` 0x61's register 7 bit 5 and register 0x0A's bits 5 to 0, the RF test library's `pa_reg_opt` writes by the rate,
+  and the regulators `wifi_rx_opt` moves near 2440 and 2480 MHz: the library's names alone, see "The analog I2C's writes of the RF test library".

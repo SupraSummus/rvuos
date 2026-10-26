@@ -108,3 +108,133 @@ readers, and `macstart.c`'s own transcription gives the fields:
 | `RX_POLICY` | 0x600a40d8 | `hal_init` (bits 0, 2, 7, 9 set; bits 6, 10, 13 cleared), the driver's own `mac_receive` (bits 4, 6, 10 cleared; bits 1, 8 set) | -- | their `hal_mac_rx_set_policy(0, 1, 1, 1)` clears bits 4, 6 and 10 and their `hal_mac_set_rxq_policy(0, 1)` sets bits 1 and 8; the scan cannot follow those two, which reach the word through its interface's number |
 
 `mac.c` names every word of the first group's kind that it writes, so none of its own is above.
+
+## What Espressif's RF test writes
+
+Espressif's RF test firmware sends and receives Wi-Fi frames with no pp or net80211, see `rftest.md`;
+its library, `librftest.a`, writes the MAC's words below (known, the library's disassembly and Ghidra's pseudo-C of the functions named).
+The roles are inferred from the functions' names and prints, and nothing here was run on the board.
+
+### The slots, by the test's queue numbers
+
+The library reaches a slot's words through getters that map a queue number from 1 to 27 to an address, through tables in its data.
+Queues 4 to 10 and 18 to 20 give slot 0, and queues 11 to 17 and 21 to 27 slots 1 to 7, in `macregs.h`'s layout, which agrees.
+The getters name words `macregs.h` does not:
+
+| getter | the word | `macregs.h` |
+|---|---|---|
+| `Conf2AddrGet` | `TX_QUEUE(s)` + 0x00 | `TX_CONF0` |
+| `Conf1AddrGet` | + 0x04 | `TX_MPLEN` |
+| `ConfAddrGet` | + 0x08; `BackOffCountGet` reads its low 12 bits as the backoff count | `TX_EDCA` |
+| `Plcp0AddrGet` | + 0x0C | `TX_PLCP0` |
+| `Plcp1AddrGet` | `TX_PPDU(s)` + 0x00 | `TX_PLCP1` |
+| `ThresholdAddrGet` | + 0x04 | `TX_PROT` |
+| `HTsigAddrGet` | + 0x0C, the HT-SIG | -- |
+| `Hesig1AddrGet` | + 0x18, the HE-SIG-A1 | -- |
+| `Hesig2AddrGet` | + 0x1C, the HE-SIG-A2 | -- |
+| `PakagenumAddrGet` | + 0x28, a packet count | -- |
+| `HT40LENAddrGet` | + 0x30 | `TX_TXLEN` |
+| `DurAddrGet` | + 0x38, a duration | -- |
+
+Queues 1, 2 and 3 give addresses where slots 9, 10 and 11 would lie by the same steps:
+for queue 1, PLCP0 at 0x600A4CDC and PLCP1 at 0x600A5074.
+But slot 11's would be words the MAC uses otherwise:
+- its `TX_CONF0`, 0x600A4CB0, is `mac.c`'s `TXQ_STATE01`, which the test's sender clears and prints as `col`;
+- its `TX_MPLEN`, 0x600A4CB4, is `TXQ_CLR2`;
+- its `TX_PLCP0`, 0x600A4CBC, is `HE_HAL_CBC`.
+So queues 1 to 3 are not slots in that layout; what they are is an open question.
+The test sends on queue 10, slot 0.
+
+### The test sender
+
+`WifiTxStart` and the functions under it, for each frame:
+
+- `fill_tx_frame` writes slot 0:
+  - `TX_EDCA` 0 and `TX_PLCP0` the low 20 bits of the first descriptor's address;
+  - `TX_PLCP1` the length in bits 0 to 11 and the rate in bits 12 and up, with 0x200B000 more for an HT rate;
+  - the HT-SIG word the MCS, the length shifted 8 and two flags;
+  - for an HT rate, `TX_TXLEN`'s bits 0 to 18 the length, and `HAL_WORD` 0x600A4C8C's bit 4 cleared;
+  - the HE-SIG-A2 word's bits 11 to 27 the length plus 4.
+  The frame lies in up to four descriptors, one an aggregate's subframe, each with its length shifted 14,
+  `mac.c`'s `DESC_LEN_SHIFT`, and its bits 30 and 31 as `mac.c`'s `DESC_EOF` and `DESC_OWNER`, which agrees.
+- `tx_a_frame` starts it:
+  - `MAC_ENABLE` 0x600A4C40 gets bit 1 and `INT_CLEAR` 0x600A4C4C bits 0 and 1;
+  - the slot's `TX_EDCA` takes 1 in bits 12 to 21;
+  - `TX_PLCP0` takes bits 30 and 31, `mac.c`'s `TX_PLCP0_ARM`, which agrees.
+  It then waits for `INT_STATUS` 0x600A4C48's bit 1.
+  After 50 ms it prints `tx is blocked!` with five words:
+  - `col`, `TXQ_STATE01` 0x600A4CB0, `mac.c`'s collision group, which agrees;
+  - `block`, `TX_BLOCK` 0x600A4CA8, which agrees;
+  - `diag3`, 0x600A4E54, the word `README.md` saw move between two reads;
+  - `bb`, `bb` 0x600A7C08;
+  - and the slot's `TX_PLCP0` and `TX_EDCA`.
+- `WifiTxStart` writes `TXQ_STATE01` 0 before the run.
+  It takes the CCA off where asked, and prints `tx_state` from 0x600A4C74 at the end.
+- libphy's `phy_disable_cca_new` writes 0x600A4C5C's bits 28 to 31 as 0xA, and its `phy_enable_cca_new` clears the four.
+  The word is the CCA's, as a hypothesis from the names; the ROM's own `phy_disable_cca` writes the AGC instead, see `phy.md`, "Receive".
+- For an HE rate, `phy_11ax_tx_mode` writes:
+  - `TX_PLCP1`'s bits 25 and 26 as 2;
+  - the HE-SIG-A1 word, HE-SIG-A1's 26 bits with HE-SIG-A2's low 6 bits above them in bits 26 to 31;
+  - the HE-SIG-A2 word's bits 0 to 9, the rest of HE-SIG-A2, and its bit 10 set for HE-ER and cleared for HE-SU and HE-TB;
+  - the HT-SIG word's bit 7 cleared.
+  Where the console gives no HE-SIG-A1, the library makes one: the GI and LTF code shifted 21, plus 0xE007, plus eight times the MCS.
+- For HE-TB it also writes these words:
+  - 0x600A4480's bit 15, set for HE-TB and cleared otherwise;
+  - 0x600A44B0, with bit 0, bits 21 and 23, and the RU allocation's index in bits 14 to 20;
+  - 0x600A44B4's bits 0 to 11 and 23 to 27;
+  - 0x600A44B8, a table's 16 bits with HE-SIG-A2 above;
+  - 0x600A44BC's bits 0 to 25, HE-SIG-A1 less 1;
+  - 0x600A44C0's bits 0 to 11.
+  The values come from `get_hetb_reg`'s table by the RU.
+- `tx_nominal_pe_set(rate, pe)` writes the HE nominal packet extension's code into 0x600A4C90, a five-bit field for each group of MCSs:
+
+  | rate codes | MCS | bits |
+  |---|---|---|
+  | 0x10 | MCS0 | 0 to 4 |
+  | 0x11 and 0x12 | MCS1 and 2 | 5 to 9 |
+  | 0x13 and 0x14 | MCS3 and 4 | 10 to 14 |
+  | 0x15 to 0x17 | MCS5 to 7 | 15 to 19 |
+  | 0x18 and 0x19 | MCS8 and 9 | 20 to 24 |
+
+- `esp_hetb_enable(1)` writes fixed values, and `esp_hetb_enable(0)` its others:
+
+  | word | `esp_hetb_enable(1)` | `esp_hetb_enable(0)` |
+  |---|---|---|
+  | `HE_MAC_DELAY0` | 0x1409D800 | 0x2EA9D800 |
+  | `HE_MAC_DELAY1` | 0x0BD234A0 | 0x0BD2356D |
+  | `HE_AID` 0x600A4038 | 0x3FE801 | 0x3FE800 |
+  | `BSSID_LO` | 0x66666666 | 0 |
+  | `BSSID_HI` | 0x80016666, the BSSID 66:66:66:66:66:66 with `BSSID_FLAG` | 0x80000000 |
+  | `HE_CTRL` 0x600A4C80 | 0x28010C80 | -- |
+
+- `phy_11ax_rx_set(id)` sets `HE_AID`'s bit 22 and writes `id` into its bits 0 to 10 and 11 to 21.
+
+### The test receiver
+
+`do_rx_poll`, under the console's `esp_rx`, counts frames:
+
+- It writes `KEY_CFG0` 0 and 0x600AD004 0, and clears `INT_CLEAR`'s bits 2 and 3.
+- It then polls `INT_STATUS` 0x600A4C48:
+  - bit 2 a frame received;
+  - bit 3 an event at which it reads `agc` 0x600A706C's low byte, a level as a hypothesis.
+  It clears each through `INT_CLEAR`.
+  The test's status bits, 1 for a frame sent and 2 and 3 for the receive, are not `mac.c`'s, `INT_RX` 0x4000 and `INT_TX_END`.
+  `mac_init` sets `MAC_ENABLE` to 0x1F, not the libraries' 0x19A879E0, so the mask chooses which causes the word reports, as a hypothesis.
+- It finds the frame at `*(0x600A4090 + 4 + (RX_LAST_HIGH & 0xFFF00000)) + (RXBUF_MAC_7C & 0xFF)`.
+- It reads the last frame's rate from three words:
+  - 0x600A40AC's bits 16 to 20, a legacy rate's code, and bits 22 and 23, a format;
+  - 0x600A40B0's bit 7, set for an HT frame, and bits 0 to 5, its MCS;
+  - 0x600A40A8's low byte.
+- The receive filters: `set_mac_filter` and `setmacaddr` write `STA_ADDR_LO/HI` with `STA_ADDR_FLAG` and the BSSID with `BSSID_FLAG`,
+  and `rx_per_init` sets `RX_POLICY` and the three interfaces' words after it to 0xD and 0xF in their low bits.
+
+The test's `mac_init` writes these words:
+- `HAL_CFG`'s bit 1;
+- `RX_POLICY`'s low three bits cleared;
+- `HAL_WORD`'s bits 1, 4 and 31 cleared and bit 23 set;
+- `RXBUF_MAC_7C`'s bit 28 and its low byte 0xC;
+- `MAC_ENABLE` 0x1F;
+- `STA_ADDR` 04:05:06:07:08:09, with no flag;
+- slot 0's `TX_EDCA` 0x04013000;
+- 0x600A4C24's bit 31 cleared;
+- the receive's `RX_BASE` and `RX_CTRL`.
