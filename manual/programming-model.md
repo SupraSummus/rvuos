@@ -1,141 +1,198 @@
 # rvuos user manual: the programming model
 
-Chapter 5 of the user manual; [`MANUAL.md`](../MANUAL.md) has its contents.
+This is chapter 5 of the user manual.
+[`MANUAL.md`](../MANUAL.md) lists all chapters,
+and explains the words this chapter uses.
 
 ## 5. The programming model
 
 ### 5.1 Processes, threads and regions
 
-A **process** is a protection domain:
-`PROCESS_TABLES` table slots, two today, which hold the capability tables it names capabilities in,
-the region slots its creator asked for, one at least and no more than the core has PMP entries for them,
-and the threads that run in it.
-A **thread** is an execution context inside a process:
-a register frame and a state.
-Threads of one process share its regions and its capability tables.
+A **process** is a protection domain.
+It has three parts:
 
-A **frame** is a physical address range with maximum rights,
-and a **region** is a frame installed into one of a process's slots,
-which gives that process access to the range with the rights chosen at install time.
-Regions are all a process can see of memory.
-An **Untyped** is memory that has not become anything yet:
-it cannot be installed, and it is made into a frame, a pool or its two halves.
-The kernel does not know what a code segment, a stack or a heap is;
-whoever builds a process decides its layout.
+- `PROCESS_TABLES` table slots, two today.
+  They hold the capability tables in which the process names its capabilities.
+- Its region slots.
+  Its creator chooses how many:
+  at least one, and at most the number of PMP entries the core has for regions.
+- The threads that run in it.
+
+A **thread** is an execution context inside a process:
+a set of registers and a state.
+The threads of one process share its regions and its capability tables.
+
+A **frame** is a range of physical addresses, of memory or of a device's registers,
+with the most rights that any use of it may have.
+A **region** is a frame installed into one of a process's region slots.
+It gives that process access to the range,
+with the rights chosen when the frame was installed.
+A process sees memory only through its regions.
+
+An **Untyped** is memory that has not become anything yet.
+It cannot be installed.
+It is made into a frame, into a pool, or into two halves.
+
+The kernel does not know what a code segment, a stack or a heap is.
+Whoever builds a process decides its layout.
 
 ### 5.2 Capabilities and the tables
 
-A process names everything by **slot number**, a slot of one of its capability tables:
-`SLOT_IN(t, i)`, `t << SLOT_TABLE_SHIFT | i`, is index `i` of the table in table slot `t`,
-and `SLOT_TABLE_SHIFT` is 10, so the numbers below 1024 are the first table's,
-and a process with one table names its slots by their indices.
-A slot is empty or holds one capability:
-a type, a set of rights, and two words the kernel interprets by type.
-Userspace never sees a slot's links, nor the address of an object,
-but whoever holds a capability may ask what it is, with no right, `OP_CAP_INFO`, section 6.16:
-its type, its rights and what it names, what a frame covers, say.
+A process names everything by a **slot number**.
+A slot number points to a slot in one of the process's capability tables.
+`SLOT_IN(t, i)` is index `i` of the table in table slot `t`.
+Its value is `t << SLOT_TABLE_SHIFT | i`, and `SLOT_TABLE_SHIFT` is 10.
+So the numbers below 1024 are slots of the first table,
+and a process with one table names its slots by their index.
 
-Every system call is an invocation on the capability in one slot.
-The kernel resolves the slot,
-checks the capability's type and rights against the operation,
-and only then looks at the arguments;
-section 6.1 gives the exact order.
-An empty slot, an index out of range, or a number whose table slot holds no table fails with `KERR_INVALID_CAP`.
+A slot is either empty or holds one capability.
+A capability is a type, a set of rights, and two words.
+The kernel reads the two words according to the type.
+A program never sees how slots are linked, or where an object lies in memory.
+But whoever holds a capability can ask what it is, with `OP_CAP_INFO` (section 6.16).
+This needs no right.
+The answer gives the capability's type, its rights and what it names,
+for example the memory that a frame covers.
 
-A process holds each of its tables by a capability of its own,
-derived from the `CapTable` capability it was allocated with, for the first table,
-or mounted with, `OP_PROCESS_MOUNT`, section 6.7, for any table slot.
-A table may lie in any pool,
-and several processes may be allocated with one table, or mount it, and then share it.
-Revoking below that capability, or destroying the pool the table lies in,
-takes the table from the process, as `OP_PROCESS_UNMOUNT` does,
-and from then on every number pointing into that table slot fails with `KERR_INVALID_CAP`;
-a process whose table slots are all empty fails every call.
-The table itself stays as long as its pool does,
-and so does everything in it.
+Every system call is an invocation of the capability in one slot.
+The kernel first finds the slot.
+Then it checks the capability's type and rights against the operation.
+Only after that does it look at the arguments.
+Section 6.1 gives the exact order.
+The call fails with `KERR_INVALID_CAP` in these cases:
+the slot is empty,
+the index is out of range,
+or the table slot in the number holds no table.
 
-A process moves to another table by itself, every capability keeping its number:
-it mounts the new table in table slot 1,
-moves each capability `i` to index `i` of it with `OP_CAP_MOVE`, where `SLOT_IN(1, i)` names it meanwhile,
-the new table's own capability last,
-then unmounts table slot 0 and mounts the new table there, both through `SLOT_IN(1, process)`,
-and unmounts table slot 1.
-So a process outgrows the table it was made with, or leaves memory it is to give back,
-which a revoke refuses to destroy while one of its tables lies there, section 5.5.
-No other thread of the process may make a call meanwhile.
-`self_migrate` in `user/lib/self.h` does it.
+**How a process holds its tables.**
+A process holds each of its tables through a capability of its own.
+For the first table, this capability is derived from the `CapTable` capability that the process was allocated with.
+For a table mounted with `OP_PROCESS_MOUNT` (section 6.7),
+it is derived from the `CapTable` capability that the mount names.
+A table can lie in any pool.
+Several processes can be allocated with one table, or mount it.
+They then share the table.
 
+Two things take a table away from a process, as `OP_PROCESS_UNMOUNT` does:
+revoking below that capability,
+or destroying the pool that the table lies in.
+After that, every slot number that points into that table slot fails with `KERR_INVALID_CAP`.
+A process whose table slots are all empty fails every call.
+The table itself lasts as long as its pool, and so does everything in it.
+
+**Moving to a new table.**
+A process can move to another table by itself,
+and every capability keeps its slot number.
+The steps are:
+
+1. Mount the new table in table slot 1.
+2. Move each capability `i` to index `i` of the new table with `OP_CAP_MOVE`.
+   During the move, `SLOT_IN(1, i)` names the moved capability.
+   Move the new table's own capability last.
+3. Unmount table slot 0, and then mount the new table there.
+   Do both through `SLOT_IN(1, process)`,
+   where `process` is the index of the process's capability to itself.
+4. Unmount table slot 1.
+
+This lets a process grow beyond the table it was made with.
+It also lets a process leave memory that it has to give back.
+A revoke refuses to destroy memory while one of the caller's tables lies in it (section 5.5).
+No other thread of the process may make a call during the move.
+`self_migrate` in `user/lib/self.h` does these steps.
+
+**Rights.**
 Rights are three bits:
 
 | Bit | Value | Frame, Untyped | Other types |
 |---|---|---|---|
 | `RIGHT_R` | 1 | read | `Notification`: wait; `Thread`: read its overruns |
 | `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy or move into a table; `Print`: write into the log; `Halt`: halt the machine; `Test`: drive it as a test does |
-| `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time |
+| `RIGHT_X` | 4 | execute | `Time`: the threads bound through it also run on spare time |
 
-Every operation that produces a capability
-puts it into a slot of one of the caller's own tables,
-named by an argument, and that slot must be empty.
+**Where a new capability goes.**
+Every operation that makes a capability puts it into a slot of one of the caller's own tables.
+An argument names that slot, and the slot must be empty.
 A process needs no capability to receive into its own tables.
-The `CapTable` capability exists for writing into a table:
-a parent fills a child's table with `OP_CAP_COPY`, `OP_CAP_DERIVE` or `OP_CAP_MOVE` before starting it,
-and a process that holds a capability to its own table
-can copy and move within it, clear its own slots, and revoke below them.
+The `CapTable` capability is for writing into a table.
+For example, a parent fills a child's table with `OP_CAP_COPY`, `OP_CAP_DERIVE` or `OP_CAP_MOVE`
+before it starts the child.
+A process that holds a capability to its own table can copy and move within that table,
+clear its own slots, and revoke below them.
 
-Every capability remembers what it was derived from,
-and that is what `OP_CAP_REVOKE` follows.
+**The derivation tree.**
+Every capability remembers the capability it was derived from.
+Together they form a tree, and `OP_CAP_REVOKE` follows it.
+In this manual, a capability is **below** another one when it lies under it in this tree.
+A capability that lies below nothing is a **root**.
 The tree grows in these ways:
 
-| Operation | The new capability hangs |
+| Operation | Where the new capability goes |
 |---|---|
 | `OP_CAP_DERIVE` | below the source |
-| `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
-| `OP_CAP_MOVE` | where the source hung, which it leaves empty, with what hung below the source below it |
-| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_ROUTE_CARVE` | below the invoked capability |
+| `OP_CAP_COPY` | next to the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
+| `OP_CAP_MOVE` | in the source's place; the source slot becomes empty, and everything that was below the source is now below the new capability |
+| `OP_FRAME_CARVE`, `OP_NOTIFY_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_ROUTE_CARVE`, `OP_DMA_CARVE` | below the invoked capability |
 | `OP_UNTYPED_RETYPE` of a frame, `OP_UNTYPED_SPLIT` | below the invoked Untyped |
-| `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
-| `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
+| `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which is below the invoked Untyped |
+| `OP_PROCESS_INSTALL` | the installed region goes below the frame |
 | `OP_POOL_ALLOC` | below the invoked `KernelPool` capability |
-| `OP_POOL_ALLOC` of a `Process` | and the process's hold on its first table below the `CapTable` capability |
-| `OP_PROCESS_MOUNT` | the process's hold on the table below the `CapTable` capability |
-| `OP_POOL_ALLOC` of a `Thread` | and the thread's hold on its process below the `Process` capability |
-| `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
-| `OP_IRQ_BIND` | and the `Irq`'s hold on its notification below the `Notification` capability |
-| `OP_TIME_BIND` | the thread's hold on its units hangs below the invoked `Time` capability |
-| `OP_ROUTE_BIND` | below the `KernelPool` capability; the channel goes with what was derived from it |
-| `OP_ROUTE_END` | the `Route`'s hold on the end hangs below the `Frame` capability |
-| `OP_DMA_BIND` | below the `KernelPool` capability; the channel goes with what was derived from it |
-| `OP_DMA_END` | the `Dma`'s hold on the end hangs below the `Frame` capability |
-| boot | nowhere, but for the root task's frames and the boot pool's block, below `BOOT_CAP_ROOT_RAM`, the boot pool's own node, below that block, and the capabilities to the boot pool and its objects, below that node |
+| `OP_POOL_ALLOC` of a `Process` | also: the process's hold on its first table goes below the `CapTable` capability |
+| `OP_PROCESS_MOUNT` | the process's hold on the table goes below the `CapTable` capability |
+| `OP_POOL_ALLOC` of a `Thread` | also: the thread's hold on its process goes below the `Process` capability |
+| `OP_IRQ_BIND` | below the `KernelPool` capability; the invoked line capability is cleared, with everything below it |
+| `OP_IRQ_BIND` | also: the `Irq`'s hold on its notification goes below the `Notification` capability |
+| `OP_TIME_BIND` | the thread's hold on its units goes below the invoked `Time` capability |
+| `OP_ROUTE_BIND` | below the `KernelPool` capability; the invoked channel capability is cleared, with everything below it |
+| `OP_ROUTE_END` | the `Route`'s hold on the end goes below the `Frame` capability |
+| `OP_DMA_BIND` | below the `KernelPool` capability; the invoked channel capability is cleared, with everything below it |
+| `OP_DMA_END` | the `Dma`'s hold on the end goes below the `Frame` capability |
+| boot | roots, except: the root task's frames and the boot pool's block are below `BOOT_CAP_ROOT_RAM`; the boot pool's own node is below that block; the capabilities to the boot pool and its objects are below that node |
 
-`OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
-derived capabilities, their copies, what was derived from those,
-every region installed from any of them,
-and every thread's units bound through any of them;
-a thread made through any of them loses its process and stops, section 5.6,
-an `Irq` bound through any of them loses its notification and is disarmed, section 5.9,
-a `Route` connected through any of them loses that end and is disarmed, section 5.13,
-and a `Dma` connected through any of them loses that end and its channel stops, section 5.14.
-Below an Untyped it destroys every pool made of it, section 5.5.
-The slot itself stays.
-Revoking a copy takes nothing from the original, and the other way round;
-to take both back, revoke below what they were both derived from.
-So derive to lend, and copy to keep a second handle to what you hold.
-A copy cannot take back what was derived from its source, since that hangs below the source and not below the copy;
-to hand over a capability together with that power, move it.
-An Untyped can only be derived, and only while nothing was made of it:
-the derived one is the whole of it, and the source makes nothing until that one is gone.
+**Revoke.**
+`OP_CAP_REVOKE` on a slot clears everything below it, in every table of every process.
+This includes:
 
-`OP_CAP_DELETE` clears one slot and hands what hung below it to the slot's parent,
-so deleting your own copy of something you lent does not take it back.
-Destroying a pool clears every slot in the tables that pool held the same way,
-so what a process handed out through its table outlives the process,
+- the capabilities derived from it, their copies, and what was derived from those,
+- every region installed from any of them,
+- every binding of a thread to units made through any of them.
+
+Objects that hold something through any of them lose it:
+
+- A thread made through any of them loses its process and stops (section 5.6).
+- An `Irq` bound through any of them loses its notification and is disarmed (section 5.9).
+- A `Route` connected through any of them loses that end and is disarmed (section 5.13).
+- A `Dma` connected through any of them loses that end, and its channel stops (section 5.14).
+
+A revoke below an Untyped destroys every pool made from it (section 5.5).
+The revoked slot itself stays as it is.
+
+**Copy or derive?**
+Revoking a copy takes nothing from the original.
+Revoking the original takes nothing from a copy.
+To take both back, revoke below the capability that both were derived from.
+So derive a capability to lend it,
+and copy a capability to keep a second handle to something you hold.
+A copy cannot take back what was derived from its source,
+because that is below the source and not below the copy.
+To hand over a capability together with that power, move it.
+
+An Untyped can only be derived, and only while nothing was made from it.
+The derived Untyped covers all of its source.
+The source cannot make anything until the derived one is gone.
+
+**Delete.**
+`OP_CAP_DELETE` clears one slot.
+What was below that slot moves up to the slot's parent.
+So if you delete your own copy of something you lent, you do not take it back.
+Destroying a pool clears every slot of the tables in that pool in the same way.
+So what a process handed out through its table lives on after the process,
 below whatever the process derived it from.
 
-Copying and deriving both apply a rights mask, so rights only ever narrow.
-A move keeps the rights as they were, since what hangs below may hold all of them.
+Copying and deriving both apply a rights mask,
+so rights stay the same or become fewer, never more.
+A move keeps the rights unchanged, because the capabilities below it may hold all of them.
 
-Slot 0 of the root task's table is left empty on purpose,
+Slot 0 of the root task's table is empty on purpose,
 so that an uninitialised index fails.
 Programs are encouraged to keep the same convention.
 
@@ -148,7 +205,7 @@ Programs are encouraged to keep the same convention.
 | `KernelPool` | `CAP_POOL` | the pool's descriptor, at its base | `OP_UNTYPED_RETYPE` |
 | `CapTable` | `CAP_CAPTABLE` | a table of `n` slots | `OP_POOL_ALLOC` |
 | `Process` | `CAP_PROCESS` | capabilities to its tables, region slots, a PMP image | `OP_POOL_ALLOC` |
-| `Thread` | `CAP_THREAD` | a register frame, a state and its places | `OP_POOL_ALLOC` |
+| `Thread` | `CAP_THREAD` | its registers, a state and its places | `OP_POOL_ALLOC` |
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
@@ -162,98 +219,117 @@ Programs are encouraged to keep the same convention.
 | `Test` | `CAP_TEST` | none | boot |
 | `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
-`Untyped`, `Frame`, `IrqLine`, `Time`, `RouteLine`, `DmaLine`, `Print`, `Halt`, `Test` and `Clock` capabilities have no kernel object behind them.
-Carving a frame, a range of lines, units or channels, retyping an Untyped into a frame and splitting one,
-are pure table operations
-that touch no kernel memory,
-which is why the root task can hand out memory, lines and time
-before it has created a single pool.
+These capabilities have no kernel object behind them:
+`Untyped`, `Frame`, `IrqLine`, `Time`, `RouteLine`, `DmaLine`, `Print`, `Halt`, `Test` and `Clock`.
+Some operations change only the tables and touch no kernel memory:
+carving a frame, a range of lines, units or channels,
+retyping an Untyped into a frame,
+and splitting an Untyped.
+This is why the root task can hand out memory, lines and time
+before it has created any pool.
 
 ### 5.4 Memory: Untyped, frames and installing
 
 Every frame and every Untyped is a **block**:
-its size is a power of two and its base a multiple of its size,
-which is the range one PMP entry in NAPOT mode describes.
-The smallest block is eight bytes, or the PMP's grain if that is coarser;
-`OP_CAP_INFO` on any frame returns it in `a4`.
-A range of any other size is rounded up or made of several blocks,
-one region slot each.
+its size is a power of two, and its base is a multiple of its size.
+One PMP entry in NAPOT mode describes exactly such a range.
+The smallest block is eight bytes, or the PMP's grain if that is larger.
+`OP_CAP_INFO` on any frame returns the smallest block size in `a4`.
+A range of any other size is rounded up,
+or made of several blocks, which use one region slot each.
 
-An Untyped is **free** while nothing made of it is left, and **made** while something is;
-`OP_CAP_INFO` says which in `a4`: what lies first below it, `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, or 0 while it is free.
-That is the first of what lies there:
-once a delete handed up what lay below the deleted capability, several kinds may lie side by side.
-One whose delete stopped part way makes nothing until it is gone, even once `a4` says 0, section 6.4:
-what it made became roots, which lie in its memory.
-A free Untyped makes one thing of the whole of its memory:
-`OP_UNTYPED_SPLIT` its lower and its upper half, two Untypeds,
-`OP_UNTYPED_RETYPE` a frame or a pool,
-and `OP_CAP_DERIVE` an Untyped of all of it, for lending, section 6.4.
-A made one makes nothing (`KERR_NO_MEMORY`),
-so what one Untyped makes never overlaps,
+An Untyped is **free** while nothing made from it remains.
+It is **made** while something made from it remains.
+`OP_CAP_INFO` tells which, in `a4`:
+0 while the Untyped is free,
+or else the type of the first capability below it: `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`.
+It shows only the first one.
+When a delete has moved up what was below the deleted capability,
+several kinds can lie below the Untyped side by side.
+A delete of an Untyped that is a root may stop part way (section 6.4).
+Such an Untyped makes nothing until it is gone, even when `a4` says 0.
+The reason is that what it made became roots, and they lie in its memory.
+
+A free Untyped makes one thing out of all of its memory:
+
+- `OP_UNTYPED_SPLIT` makes two Untypeds, its lower half and its upper half.
+- `OP_UNTYPED_RETYPE` makes a frame or a pool.
+- `OP_CAP_DERIVE` makes an Untyped of all of it, for lending (section 6.4).
+
+A made Untyped makes nothing; the call fails with `KERR_NO_MEMORY`.
+So the things that one Untyped makes never overlap,
 and a frame never overlaps a pool.
-Once what it made is gone, whether deleted, destroyed or revoked, it is free again, the whole of it.
+When everything it made is gone, whether deleted, destroyed or revoked,
+the Untyped is free again, all of it.
 
-Where a block lies is the program's to choose, by the half it takes;
-the kernel keeps no allocator.
-To get a small block out of a large Untyped, halve it down,
-and keep the halves not used yet: they are the program's free memory.
-A half the program does not want to keep a slot for may be deleted;
-what was made of it then hangs below its parent,
-which is free again once all of that is gone.
-A frame and an Untyped carry the rights of the Untyped they were made of.
-`OP_FRAME_CARVE` hands out a block within a frame.
-Programs that lay memory out with fixed offsets
-should check the smallest size once and fail early if the layout does not fit.
+**Choosing where a block lies.**
+The program chooses where a block lies, by the half it takes.
+The kernel has no allocator.
+To get a small block out of a large Untyped, split it in halves again and again.
+Keep the halves you do not use yet: they are the program's free memory.
+You may delete a half if you do not want to keep a slot for it.
+What was made from that half then moves below its parent,
+and the parent is free again once all of that is gone.
+A frame or an Untyped has the rights of the Untyped it was made from.
+`OP_FRAME_CARVE` hands out a block inside a frame.
+A program that lays memory out at fixed offsets
+should check the smallest block size once, and fail early if its layout does not fit.
 
-Rules for installing a frame into a process:
+**Rules for installing a frame into a process:**
 
-- The rights installed must be a non-empty subset of the frame's rights.
+- The installed rights must be a non-empty subset of the frame's rights.
 - Write without read is refused,
-  because PMP reserves that encoding and hardware may do anything with it.
-- On ARM execute without read is refused too, since the MPU fetches only what a thread may read.
-- Regions installed in one process may not overlap each other.
-- The install takes effect at once, even for the running process.
+  because PMP reserves that encoding, and the hardware may do anything with it.
+- On ARM, execute without read is refused too,
+  because the MPU fetches only what a thread may read.
+- Regions installed in one process must not overlap each other.
+- An install takes effect at once, even for the running process.
 
-PMP budget.
-Every installed region is one NAPOT entry, so `n` regions cost `n` entries.
-A process is made with its region slots, `a4` of `OP_POOL_ALLOC`,
-from one to the entries the core has for regions, section 10;
-more, or none, is `KERR_INVALID_ARG`, so every slot may be filled at once.
-`OP_CAP_INFO` on any process tells its region slots in `a2` and that most in `a3`.
-The root task's process has `ROOT_REGION_SLOTS`, eight, or the most where that is fewer.
+**PMP budget.**
+Every installed region uses one NAPOT entry, so `n` regions use `n` entries.
+The number of a process's region slots is fixed when the process is made, by `a4` of `OP_POOL_ALLOC`.
+It is from one to the number of entries the core has for regions (section 10).
+More, or none, fails with `KERR_INVALID_ARG`.
+So all region slots can be filled at the same time.
+`OP_CAP_INFO` on any process returns its number of region slots in `a2`,
+and the largest number allowed in `a3`.
+The root task's process has `ROOT_REGION_SLOTS` region slots, eight,
+or the largest number allowed if that is less.
 
-An access must lie entirely within one PMP entry.
-Two regions that touch share a boundary
-that no single load, store or instruction fetch may cross,
-so a process's creator lays it out so that nothing straddles one.
+A memory access must lie entirely within one PMP entry.
+When two regions touch, no single load, store or instruction fetch may cross the boundary between them.
+So whoever creates a process lays it out so that no access crosses such a boundary.
 
-Sharing costs no copy: installing the same range into two processes
-gives both access, and no byte passes through the kernel.
-What it does cost is a region slot and a PMP entry in each process.
+Sharing needs no copy.
+If the same range is installed into two processes, both can access it,
+and no byte passes through the kernel.
+The cost is one region slot and one PMP entry in each process.
 
 ### 5.5 Pools
 
-A process hands memory to the kernel with `OP_UNTYPED_RETYPE` of a `CAP_POOL`,
-which makes the whole of the Untyped a pool.
-The Untyped must carry both read and write rights,
-and be at least `POOL_MIN_SIZE`, 64 bytes.
-The kernel places the pool's descriptor at its base
+A process gives memory to the kernel with `OP_UNTYPED_RETYPE` to `CAP_POOL`.
+This makes the whole Untyped into a pool.
+The Untyped must have both read and write rights,
+and must be at least `POOL_MIN_SIZE`, 64 bytes.
+The kernel puts the pool's descriptor at the pool's base,
 and returns a `KernelPool` capability with all rights.
-The memory belongs to the kernel from then on;
-no frame covers it, since what one Untyped makes never overlaps.
-The kernel zeroes each object as it allocates it,
-so what the process left in the memory never becomes part of an object.
+From then on, the memory belongs to the kernel.
+No frame covers it, because the things that one Untyped makes never overlap.
+The kernel zeroes each object when it allocates it,
+so old data that the process left in the memory never becomes part of an object.
 
-Objects are bump-allocated from a pool, sixteen-byte aligned,
-and never freed individually.
-Sizes depend on the architecture, the board and the build, and the kernel may change them,
-so a program asks the pool: `OP_POOL_INFO` tells what an object of a type takes, as the pool counts it,
-`CAP_POOL` the descriptor, section 6.6,
-and `OP_CAP_INFO` on the pool what is left of it, its room.
-A pool for a set of objects needs the descriptor and them,
-rounded up to a power of two of at least `POOL_MIN_SIZE`, since an Untyped is a block.
-Today's sizes, as the kernel rounds them:
+Objects are allocated from a pool one after another (bump allocation), aligned to 16 bytes.
+They are never freed one by one.
+Their sizes depend on the architecture, the board and the build, and they may change.
+So a program asks the pool:
+
+- `OP_POOL_INFO` tells how much an object of a type takes, as the pool counts it.
+  For `CAP_POOL`, it tells the size of the descriptor (section 6.6).
+- `OP_CAP_INFO` on the pool tells how much room is left in it.
+
+A pool for a set of objects needs room for the descriptor and for the objects.
+Round that up to a power of two, and to at least `POOL_MIN_SIZE`, because an Untyped is a block.
+Today's sizes, after the kernel rounds them:
 
 | Object | Bytes |
 |---|---|
@@ -266,243 +342,333 @@ Today's sizes, as the kernel rounds them:
 | `Route` | 64 |
 | `Dma` | 64 |
 
-A minimal child process, table of 10 slots, process of two region slots, thread of one place and two notifications,
-costs 624 bytes including the descriptor on RISC-V, 16 more on the ESP32-C6, and 560 on ARM;
-each region slot more costs 20 bytes and a few for its entry's configuration.
+For example, take a minimal child process:
+a table of 10 slots, a process with two region slots, a thread with one place, and two notifications.
+On RISC-V it costs 624 bytes, including the descriptor.
+On the ESP32-C6 it costs 16 bytes more, and on ARM it costs 560 bytes.
+Each extra region slot costs 20 bytes,
+plus a few bytes for the configuration of its entry.
 
 **Objects in different pools.**
-A process's tables, a thread's process and an `Irq`'s notification may each lie in any pool,
-sections 5.2, 5.6 and 5.9:
-each is held by a capability that a destroy of its pool clears.
+A process's tables, a thread's process and an `Irq`'s notification can each lie in any pool
+(sections 5.2, 5.6 and 5.9).
+Each of them is held through a capability,
+and destroying the pool it lies in clears that capability.
 
 **Capabilities to a pool.**
-Every capability to an object hangs below the `KernelPool` capability it was allocated through,
-and every `KernelPool` capability below the pool's own node,
-which the kernel keeps in the pool and no process can name.
-So revoking below a `KernelPool` capability takes what was allocated through it,
-and deleting the last `KernelPool` capability leaves the pool standing,
-reachable through nothing, until the Untyped it was made of is revoked;
-`OP_CAP_INFO` on that Untyped tells a pool below it all the while.
+Every capability to an object is below the `KernelPool` capability it was allocated through.
+Every `KernelPool` capability is below the pool's own node.
+The kernel keeps this node in the pool, and no process can name it.
+So revoking below a `KernelPool` capability takes back what was allocated through it.
+Deleting the last `KernelPool` capability does not destroy the pool.
+The pool stays, and nothing can reach it,
+until the Untyped it was made from is revoked.
+During all that time, `OP_CAP_INFO` on that Untyped says that a pool is below it.
 
-**Destroying a pool** is revoking below the Untyped it was made of, or below one above that;
-no operation on the pool does it, so a `KernelPool` capability only allocates.
-A pool is the whole of its Untyped, so keep the Untyped of a pool you mean to give back on its own.
-The destroy:
+**Destroying a pool.**
+To destroy a pool, revoke below the Untyped it was made from,
+or below any capability above that Untyped.
+No operation on the pool itself destroys it, so a `KernelPool` capability can only allocate.
+A pool takes the whole of its Untyped.
+So if you plan to give a pool's memory back, give the pool an Untyped of its own.
+The destroy does all of this:
 
-- destroys every object in it,
-- clears every capability, in every table of every process,
-  that names the pool or one of its objects,
-- clears every slot of the pool's own tables as `OP_CAP_DELETE` does,
-  so what was derived from those slots goes to their parents,
-- wakes every thread waiting on a notification in the pool
-  with `KERR_INVALID_CAP` and no bits,
-- stops every thread, in whatever pool, that ran in a process in the pool,
-- disarms every `Irq`, in whatever pool, bound to a notification in the pool,
-  and masks its line, which stays bound,
-- masks the interrupt line of every `Irq` in the pool, which frees the line,
-- zeroes the memory its objects took and leaves the rest as it was,
-  so clear memory before it becomes a pool if whoever destroys the pool should not read it,
-- gives the memory back to the Untyped the pool was made of.
+- It destroys every object in the pool.
+- It clears every capability, in every table of every process,
+  that names the pool or one of its objects.
+- It clears every slot of the pool's own tables, as `OP_CAP_DELETE` does.
+  So what was derived from those slots moves up to their parents.
+- It wakes every thread that waits on a notification in the pool.
+  The wait returns `KERR_INVALID_CAP` and no bits.
+- It stops every thread that ran in a process in the pool,
+  whatever pool the thread itself lies in.
+- It disarms every `Irq` bound to a notification in the pool,
+  whatever pool the `Irq` lies in, and masks its line.
+  The line stays bound.
+- It masks the interrupt line of every `Irq` in the pool, and this frees the line.
+- It zeroes the memory that its objects used, and leaves the rest as it was.
+  So if whoever destroys the pool should not read the old data,
+  clear the memory before you make it into a pool.
+- It gives the memory back to the Untyped that the pool was made from.
 
-The revoke fails with `KERR_STATE`
-when the calling thread, its process or a table the process mounts lies in the Untyped's memory,
-so a thread cannot destroy what it runs on
-nor a table it names capabilities in, which it unmounts or moves out of first,
-and when the table it names the Untyped in does,
-since the capability the call is made through would go half way through the destroy of that table's pool.
-The boot pool holds the root task, which therefore cannot destroy it,
-but any other thread holding `BOOT_CAP_POOL_RAM`, the block the boot pool was made of, can,
-and the root task goes with it, section 7.
-A destroy is restartable: it may stop for an interrupt and go on when the call is made again,
-and a pool being destroyed allocates nothing, `KERR_STATE`;
-a capability to it that still stands describes it as being destroyed, with no room.
+The revoke fails with `KERR_STATE` in two cases:
 
-A lender that wants memory back from a living borrower
-lends it as an Untyped derived from its own
-and revokes below its own, section 5.2.
-That takes the borrower's Untyped, the halves, the frames it made and their mappings,
-and destroys every pool the borrower made of it,
-wherever the borrower passed it on and whatever it deleted in between,
-and leaves the lender's Untyped free, the whole of it.
+- The calling thread, its process, or a table that the process mounts lies in the Untyped's memory.
+  So a thread cannot destroy what it runs on,
+  or a table that it names capabilities in.
+  It must first unmount that table, or move out of it.
+- The table in which the caller names the Untyped lies in that memory.
+  The reason is that the capability the call is made through
+  would disappear in the middle of destroying that table's pool.
+
+The boot pool holds the root task, so the root task cannot destroy it.
+But any other thread that holds `BOOT_CAP_POOL_RAM`,
+the block the boot pool was made from, can destroy it.
+The root task is then destroyed with it (section 7).
+
+A destroy can be restarted.
+It may stop for an interrupt, and it goes on when the call is made again.
+A pool that is being destroyed allocates nothing; the call fails with `KERR_STATE`.
+A capability to it that still exists describes it as being destroyed, with no room left.
+
+**Taking memory back from a borrower.**
+A lender may want memory back from a borrower that still runs.
+To make this possible, it lends the memory as an Untyped derived from its own,
+and later revokes below its own Untyped (section 5.2).
+This takes back the borrower's Untyped, its halves, the frames made from it and their mappings.
+It destroys every pool that the borrower made from it,
+wherever the borrower passed it on, and whatever the borrower deleted in between.
+After that, the lender's Untyped is free, all of it.
 
 ### 5.6 Threads
 
-A thread is **stopped**, **ready** or **waiting**.
+A thread is in one of three states: **stopped**, **ready** or **waiting**.
 
 - A new thread is stopped.
-- `OP_THREAD_CONFIGURE` sets a stopped thread's program counter, its stack pointer,
-  and its argument, which it finds in `a0`, `r0` on ARM, as a function finds its first.
+- `OP_THREAD_CONFIGURE` sets a stopped thread's program counter, stack pointer and argument.
+  The thread finds its argument in `a0` (`r0` on ARM),
+  where a function finds its first argument.
   The other registers start at zero.
-  The kernel validates none of them.
+  The kernel does not check any of these values.
 - `OP_THREAD_RESUME` makes a stopped thread ready.
-  It gets the processor once it is bound to units, or to spare time, and its turn comes, section 5.11.
-- A thread waiting on a notification is waiting;
-  a signal makes it ready again.
-- A thread that faults is stopped where it faulted; see **Faults** below.
-- `OP_THREAD_STOP` stops a thread whatever it is doing, and says which of the three it was;
+  The thread gets the processor when it is bound to units or to spare time,
+  and its turn comes (section 5.11).
+- A thread that waits on a notification is waiting.
+  A signal makes it ready again.
+- A thread that faults stops at the instruction that faulted; see **Faults** below.
+- `OP_THREAD_STOP` stops a thread, whatever it is doing,
+  and says which of the three states it was in;
   see **Stopping a thread** below.
 
-A thread holds its process by a capability derived from the `Process` capability it was allocated with,
-as a process holds its tables, section 5.2, so the thread may lie in any pool.
-Revoking below that capability, or destroying the pool the process lies in,
-takes the process from the thread, and the thread stops for good:
+A thread holds its process through a capability
+derived from the `Process` capability that the thread was allocated with.
+This works like a process holding its tables (section 5.2),
+so the thread can lie in any pool.
+Two things take the process away from the thread:
+revoking below that capability,
+or destroying the pool that the process lies in.
+The thread then stops for good:
 `OP_THREAD_RESUME` refuses it with `KERR_STATE`.
 
-Apart from its state, a thread is bound to units of time or it is not.
-A new thread is not, and a thread that is not keeps its state and does not run:
-`OP_TIME_BIND` binds it, and revoking below the capability it was bound through unbinds it.
-That is how a scheduler takes a thread's time and gives it back; `OP_THREAD_STOP` stops it, whatever it is doing.
-No thread exits: a thread that has nothing left to do says so by its own means first,
-then stops itself, through a capability to its own thread with `RIGHT_W`,
-or stops with a breakpoint, which is a fault its watch hears, below,
-or waits forever on a notification nobody signals;
-whoever hears it may stop it, or take its units or its process.
-A capability to a thread with `RIGHT_W` also sets its watch,
-so a creator that keeps a child's thread from its watch gives it none, and the child ends with a breakpoint.
+Apart from its state, a thread is either bound to units of time or not bound.
+A new thread is not bound.
+A thread that is not bound keeps its state, but does not run.
+`OP_TIME_BIND` binds a thread.
+Revoking below the capability it was bound through unbinds it.
+This is how a scheduler takes a thread's time away and gives it back.
+`OP_THREAD_STOP` stops a thread, whatever it is doing.
+
+**Ending a thread.**
+A thread cannot exit.
+A thread that has nothing left to do first tells someone so, in its own way.
+Then it does one of these:
+
+- It stops itself, through a capability to its own thread with `RIGHT_W`.
+- It stops at a breakpoint.
+  A breakpoint is a fault, and the thread's watch hears it (see **Faults** below).
+- It waits forever on a notification that nobody signals.
+
+Whoever hears about it can stop it, or take away its units or its process.
+A capability to a thread with `RIGHT_W` can also set the thread's watch.
+So a creator may want to keep a child from changing its own watch.
+It then gives the child no such capability,
+and the child ends with a breakpoint.
 
 **Stopping a thread.**
-`OP_THREAD_STOP` takes a thread to stopped from whatever it is doing, and returns what that was in `a1`,
-`THREAD_WAS_STOPPED`, `THREAD_WAS_READY` or `THREAD_WAS_WAITING`; section 6.8.
-- A stopped thread stays as it is, with the fault it has to tell, so a stop may come whatever happened meanwhile.
-- A ready thread stops where it stands, between two instructions or at a call it has not made yet.
-  One another core runs stops once that core has trapped, which the call waits for,
-  and a call it was making there is not made: its pc stays at the `ecall` or `svc`.
-- A waiting thread leaves its notification, and lends its time to nobody,
-  and stands at the call it waited in, with every register as the call found it:
-  `OP_THREAD_READ_REG` reads the call instruction at its pc, the operation in `a7` and the slot in `a0`.
-  A resume makes the call again, which checks everything afresh, as a call made again after an interrupt does:
-  bits signalled meanwhile are taken unless another waiter took them,
-  the thread joins the back of the waiters, and a slot cleared meanwhile answers `KERR_INVALID_CAP`.
-  A watcher may instead answer the wait as it emulates an instruction:
-  it writes `a0`, `a1` and the pc past the call with `OP_THREAD_WRITE_REG`, and resumes the thread.
-- The caller may stop itself, through a capability to its own thread, and goes on past the call once resumed;
-  with nothing else left to run, the machine halts with `no runnable thread`.
+`OP_THREAD_STOP` moves a thread to stopped, whatever it is doing.
+It returns the previous state in `a1`:
+`THREAD_WAS_STOPPED`, `THREAD_WAS_READY` or `THREAD_WAS_WAITING` (section 6.8).
 
-The thread keeps its process, its watch, its units and its virtual time, as at a fault,
-and the threads that lend it their time go on waiting, lending it nothing while it is stopped.
-A stop is no fault: it signals nothing, the watch included, and leaves `OP_THREAD_FAULT` nothing to tell.
-On ARM alone, a thread whose core could not stack its registers as it trapped for the stop has lost them,
-and the stop leaves it stopped where it faulted: the log reports the fault and `OP_THREAD_FAULT` tells it,
+- A stopped thread stays as it is.
+  If it has a fault to report, it keeps it.
+  So a watcher can stop a thread at any time,
+  and a fault that happened in the meantime is not lost.
+- A ready thread stops where it is:
+  between two instructions, or at a call it has not made yet.
+  If another core is running the thread, the thread stops once that core has trapped,
+  and the call waits for that.
+  A call that the thread was making there is not made: its pc stays at the `ecall` or `svc`.
+- A waiting thread leaves its notification and lends its time to nobody.
+  It stays at the call it waited in, with every register as the call found it.
+  `OP_THREAD_READ_REG` shows the call instruction at its pc,
+  the operation in `a7` and the slot in `a0`.
+  A resume makes the call again,
+  and the call checks everything again, as a call made again after an interrupt does.
+  Bits signalled in the meantime are taken, unless another waiter took them.
+  The thread joins the back of the waiters.
+  If the slot was cleared in the meantime, the call returns `KERR_INVALID_CAP`.
+  A watcher can instead answer the wait, as when it emulates an instruction:
+  it writes `a0`, `a1` and the pc past the call with `OP_THREAD_WRITE_REG`,
+  and resumes the thread.
+- The caller can stop itself, through a capability to its own thread.
+  When it is resumed, it goes on after the call.
+  If nothing else is left to run, the machine halts with `no runnable thread`.
+
+A stopped thread keeps its process, its watch, its units and its virtual time,
+as it does after a fault.
+Threads that lend it their time keep waiting,
+but lend it nothing while it is stopped.
+A stop is not a fault.
+It signals nothing, not even to the watch,
+and `OP_THREAD_FAULT` has nothing to report.
+
+On ARM only, the core may fail to save a thread's registers on its stack
+when it traps for the stop.
+The thread has then lost those registers,
+and the stop leaves it stopped where it faulted.
+The log reports the fault, and `OP_THREAD_FAULT` reports it,
 but nothing is signalled.
 
 **Faults.**
-A thread that faults, by an access fault, an illegal instruction, a misaligned access or a breakpoint,
-is stopped where it faulted, with its registers as they were and its program counter at the instruction,
-and the processor goes to the next thread; the machine goes on.
-Nothing else changes: the process, the thread's units and the process's other threads are as they were.
-The kernel writes `user fault` and the cause into its log, section 4.
-`OP_THREAD_WATCH` gives a thread a **watch**, a notification and bits that its faults signal,
-so whoever waits there hears of the fault as of any other signal;
-one wait can carry a fault's bit next to a device's or a timer's,
-and a watcher of many threads gives each a bit.
-The thread holds the notification by a capability derived from the one named, as it holds its process,
-so revoking below that capability, or destroying the notification's pool, clears the watch.
-A thread without a watch stops at a fault all the same, and nobody hears.
-What happens next is the watcher's to decide, with the operations there are:
-`OP_THREAD_RESUME` runs the faulting instruction again, after installing the region it reached for, say;
-`OP_THREAD_CONFIGURE` first starts it afresh;
-taking its process ends it, and taking its units, which a stopped thread still earns, frees them.
-A watcher may stop a thread too, which leaves one that faulted as it is, its fault still to tell.
-The bits say which thread faulted, and `OP_THREAD_FAULT` says why while it stays stopped there.
+A thread faults by an access fault, an illegal instruction, a misaligned access or a breakpoint.
+It then stops where it faulted.
+Its registers stay as they were, and its program counter points at the instruction.
+The processor goes on to the next thread, and the machine keeps running.
+Nothing else changes:
+the process, the thread's units and the process's other threads stay as they were.
+The kernel writes `user fault` and the cause into its log (section 4).
+
+`OP_THREAD_WATCH` gives a thread a **watch**:
+a notification, and the bits that the thread's faults signal on it.
+So whoever waits there hears about a fault like any other signal.
+One wait can return a fault's bit together with a device's bit or a timer's bit.
+A watcher of many threads gives each thread its own bit.
+The thread holds the notification through a capability derived from the one named,
+as it holds its process.
+So revoking below that capability, or destroying the notification's pool, clears the watch.
+
+A thread without a watch also stops at a fault, but nobody hears about it.
+The watcher decides what happens next, with the normal operations:
+
+- `OP_THREAD_RESUME` runs the faulting instruction again,
+  for example after the watcher installed the region that the thread tried to reach.
+- `OP_THREAD_CONFIGURE`, before the resume, gives the thread a new program counter, stack pointer and argument,
+  so it starts again from them.
+- Taking away its process ends the thread.
+- Taking away its units frees them.
+  A stopped thread still earns its units.
+
+A watcher can also stop a thread.
+A thread that faulted then stays as it is, with its fault still to report.
+The bits say which thread faulted.
+`OP_THREAD_FAULT` says why, while the thread stays stopped.
 A watcher that emulates the instruction writes the thread's registers with `OP_THREAD_WRITE_REG`,
-the program counter past the instruction among them, and resumes it; section 6.8.
+including the program counter past the instruction,
+and then resumes the thread (section 6.8).
 
 ### 5.7 Notifications
 
 A notification is one 32-bit word of sticky bits.
 
-- `OP_NOTIFY_SIGNAL` ORs bits into the word and never blocks.
+- `OP_NOTIFY_SIGNAL` ORs bits into the word.
+  It never waits.
   Signalling zero bits is refused.
-- `OP_NOTIFY_WAIT` returns every set bit and clears them,
-  blocking until at least one is set.
+- `OP_NOTIFY_WAIT` returns every set bit and clears them.
+  If no bit is set, it waits until at least one bit is set.
   It never returns zero bits.
 - If a thread is waiting when a signal arrives,
   that thread wakes with every bit set so far, and the word is cleared.
-- A signal that arrives before a waiter got there is not lost.
+- A signal that arrives before any thread waits is not lost.
 - When several threads wait on one notification,
-  one of them wakes and takes every bit; which one is not promised.
+  one of them wakes and takes all the bits.
+  Which one is not promised.
 
-`RIGHT_W` allows signalling and `RIGHT_R` allows waiting,
-so a client can be given the power to announce something
-without the power to consume the announcement.
+`RIGHT_W` allows signalling, and `RIGHT_R` allows waiting.
+So a client can be allowed to announce something
+without being allowed to consume the announcement.
 
-Besides its rights, a `Notification` capability carries the bits it may signal:
-every bit for the one `OP_POOL_ALLOC` returns, and fewer once `OP_NOTIFY_CARVE` has made a capability of some of them,
-below the one carved, as a frame is carved from a frame.
-They are an aligned block, as a frame is: 1, 2, 4, 8, 16 or 32 bits starting at a multiple of their count,
-so a client's own bit is one, and a pair or a byte of bits is one too, but bits 0 and 2 together are none.
-A signal sets only the bits of `a1` its capability may signal,
-and naming none of them is refused with `KERR_NO_RIGHTS`;
-copying keeps the bits, as it keeps or narrows rights.
-An `Irq` signals only the bits the capability it was bound with may, and a thread's watch only those of the one it was set with.
+**The bits a capability may signal.**
+Besides its rights, a `Notification` capability carries the bits it may signal.
+The capability that `OP_POOL_ALLOC` returns may signal every bit.
+`OP_NOTIFY_CARVE` makes a capability for some of the bits.
+The new capability is below the one it was carved from, as when a frame is carved from a frame.
+The bits form an aligned block, like a frame:
+1, 2, 4, 8, 16 or 32 bits, starting at a multiple of their count.
+So one bit is a valid block, and so are a pair of bits or a byte of bits,
+but bits 0 and 2 together are not.
+A signal sets only those bits of `a1` that its capability may signal.
+If `a1` names none of them, the signal is refused with `KERR_NO_RIGHTS`.
+Copying keeps the bits, as it keeps or narrows rights.
+An `Irq` signals only the bits that the capability it was bound with may signal.
+A thread's watch signals only the bits of the capability it was set with.
 
-So a server with many clients gives each a capability carved to the client's own bit,
-and the bits a wait returns say who signalled, whatever a client names.
-A client need not be told its bit: naming every bit, `0xffffffff`, signals all it may.
+So a server with many clients gives each client a capability carved to the client's own bit.
+The bits that a wait returns then say who signalled, whatever bits a client names.
+A client does not need to know its bit:
+if it names every bit, `0xffffffff`, it signals all the bits it may.
 
-No data passes through the kernel.
-Two processes exchange bytes through a region installed in both
+**No data passes through the kernel.**
+Two processes exchange bytes through a region installed in both,
 and use notifications to say when.
-The build targets `rv32imac`, so the `A` extension is there in user mode,
-as `ldrex` and `strex` are on ARMv7-M,
-and a lock, an event, a ring buffer or a snapshot in shared memory is userspace's to build,
-as `lib/lock.h`, `lib/event.h`, `lib/ring.h` and `lib/seqlock.h` do, section 8.4;
-what userspace cannot build is "stop me until someone says otherwise",
-and a notification is exactly that.
-A waiter that knows whom it waits for, a lock's holder or a server, may lend that thread its time, section 5.12.
+The build targets `rv32imac`, so user mode has the `A` extension, with atomic instructions.
+ARMv7-M has `ldrex` and `strex` for the same purpose.
+So user programs build their own locks, events, ring buffers and snapshots in shared memory,
+as `lib/lock.h`, `lib/event.h`, `lib/ring.h` and `lib/seqlock.h` do (section 8.4).
+What user programs cannot build is "stop me until someone tells me to go on".
+A notification is exactly that.
+A waiter that knows which thread it waits for, such as a lock's holder or a server,
+can lend that thread its time (section 5.12).
 
-A round trip is therefore four system calls:
-signal, wait on one side; wait, signal on the other.
+So a round trip takes four system calls:
+signal and wait on one side, wait and signal on the other.
 
-A trap breaks the thread's reservation,
-so an `sc.w` fails whenever a system call, the timer or an interrupt came between it and its `lr.w`;
-a loop around the pair tries again, and never succeeds with a system call inside it.
+A trap breaks the thread's reservation.
+So an `sc.w` fails whenever a system call, the timer or an interrupt came between it and its `lr.w`.
+A loop around the pair tries again.
+It never succeeds if there is a system call inside the loop.
 
 **A signal orders memory.**
-What a thread stored before `OP_NOTIFY_SIGNAL`,
-a thread sees once `OP_NOTIFY_WAIT` returns it that signal's bits, on any core:
-the signal is a release, and the wait an acquire.
-So a buffer written and then signalled needs no fence,
-as long as its reader reads it after such a wait and not because memory said it was ready;
-memory read with no call between, as a ring's counters are, still needs one on each side.
+A thread stores data and then calls `OP_NOTIFY_SIGNAL`.
+Another thread, on any core, sees that data once `OP_NOTIFY_WAIT` returns it that signal's bits.
+The signal is a release, and the wait is an acquire.
+So a buffer that is written and then signalled needs no fence,
+as long as its reader reads it after such a wait.
+It is different when the reader learns from memory itself that the data is ready.
+Memory that is read with no call in between, such as a ring's counters,
+still needs a fence on each side.
 
-**A server with many clients** waits on one notification;
-each client holds it with `RIGHT_W` only, carved to a bit of its own,
+**A server with many clients** waits on one notification.
+Each client holds it with `RIGHT_W` only, carved to a bit of its own,
 and shares a region with the server.
-One wake can carry several clients' work,
-and the bits it returns say whose, since a client cannot set another's bit;
-it cannot forge another's data or consume another's wake either.
-The server need not spend a region on each client:
-the clients' regions may all be carved from one frame the server installs once,
-as the hub of `lib/chan.h` does, section 8.4.
+One wake can carry the work of several clients,
+and the returned bits say whose work it is,
+because a client cannot set another client's bit.
+A client also cannot forge another client's data, or consume another client's wake.
+The server does not need a region for each client:
+the clients' regions can all be carved from one frame that the server installs once,
+as the hub of `lib/chan.h` does (section 8.4).
 
 ### 5.8 Time
 
 There is no sleep call and no yield.
-Time reaches userspace as one more interrupt, on a timer line.
+Time reaches user programs as one more interrupt, on a timer line.
 
-The machine has `TIMER_LINES` timer lines, 16,
-and the root task receives all of them at boot in `BOOT_CAP_TIMER_LINES`,
-apart from the controller's lines.
-It carves them and hands them out as it does any other line, section 5.9,
-so who holds how many timers is its choice.
-A timer line is bound with `OP_IRQ_BIND` like a device's,
-into an `Irq` in a pool, bound to a notification in any pool.
-`OP_IRQ_SET` arms it with a set of bits and, in `a2`, a delay in microseconds;
-when the delay has passed the line fires: the `Irq` signals those bits and disarms.
-Setting an armed timer line moves its deadline and replaces its bits;
-setting bits to zero cancels it.
-A program that needs more timers than it holds keeps its own deadlines
-and arms one line for the nearest.
+The machine has `TIMER_LINES` timer lines, 16.
+The root task receives all of them at boot in `BOOT_CAP_TIMER_LINES`,
+separately from the interrupt controller's lines.
+It carves them and hands them out like any other line (section 5.9).
+So the root task decides who holds how many timers.
+A timer line is bound with `OP_IRQ_BIND`, like a device's line.
+This makes an `Irq` in a pool, bound to a notification in any pool.
+`OP_IRQ_SET` arms it with a set of bits and, in `a2`, a delay in microseconds.
+When the delay has passed, the line fires:
+the `Irq` signals those bits and is disarmed.
+Setting a timer line that is already armed moves its deadline and replaces its bits.
+Setting it with zero bits cancels it.
+A program that needs more timers than it holds keeps its own list of deadlines,
+and arms one line for the nearest deadline.
 
-The contract is a **lower bound**.
-The delay is rounded up to whole counts of the counter,
-and the line fires at the first count past the call by that many: the kernel sets its timer for it.
-A delay of zero fires at once, as the timer the call sets comes,
-and a delay of 10 000 µs fires 10 ms after the call and a count, and the kernel's step that takes the interrupt.
-No upper bound is promised, because the woken thread is ready, not running,
-and waits for its turn,
-and for its virtual time to come if it ran ahead of its units and has no spare time, section 5.11.
+**The delay is a lower bound.**
+The kernel rounds the delay up to whole counts of the counter.
+The line fires at the first count that lies that many counts past the call;
+the kernel sets its timer for that count.
+A delay of zero fires at once, when the timer that the call sets comes.
+A delay of 10 000 µs fires 10 ms and one count after the call,
+plus the kernel's step that takes the interrupt.
+No upper bound is promised.
+The woken thread is ready, not running, and it waits for its turn.
+If it ran ahead of its units and has no spare time,
+it also waits for its virtual time to come (section 5.11).
 
 Sleeping:
 
@@ -514,21 +680,23 @@ rv_timer_set(TIMER, BIT_TIMER, us);   /* OP_IRQ_SET with the delay in a2 */
 rv_wait(NTFN, &bits);
 ```
 
-A wait with a timeout is the same two calls with one more bit:
-give the device one bit on the notification and the timer line another,
-and look at which bits came back.
+A wait with a timeout uses the same two calls with one more bit.
+Give the device one bit of the notification, and give the timer line another bit.
+Then look at which bits came back.
 
+**Periodic timers.**
 A timer line fires once, so a periodic task arms it again each time it wakes.
-With `IRQ_SET_PERIOD` in `a3` the delay is a period counted from the line's last deadline,
-or from its bind, not from the call, so the task keeps its period whatever each wake costs:
-the line fires at the first count after the call
-that lies a whole number of periods from that deadline.
-The call returns in `a1` how many such counts had already passed,
-the periods a task that woke late has skipped;
-it can do their work at once, count them as overruns, or ignore them.
-Setting it again before the line fired leaves the deadline where it was.
-The period is rounded up to whole counts and may not be zero,
-and periods are counted on the clock's counter, so they keep pace with it.
+With `IRQ_SET_PERIOD` in `a3`, the delay is a period.
+The period counts from the line's last deadline, or from its bind, and not from the call.
+So the task keeps its period, however long each wake takes.
+The line fires at the first count after the call
+that lies a whole number of periods after that deadline.
+The call returns in `a1` how many such counts had already passed.
+These are the periods that a task which woke late has skipped.
+The task can do their work at once, count them as overruns, or ignore them.
+Setting the line again before it fired leaves the deadline where it was.
+The period is rounded up to whole counts, and it must not be zero.
+Periods are counted on the clock's counter, so they keep pace with the clock.
 
 ```c
 uint32_t skipped;
@@ -540,7 +708,7 @@ for (;;) {
 ```
 
 **The clock.**
-`BOOT_CAP_CLOCK` names the machine's time, 64 bits of the counter's counts since boot.
+`BOOT_CAP_CLOCK` names the machine's time: 64 bits, the counter's counts since boot.
 With `RIGHT_R`, `OP_CLOCK_READ` returns the time and the counter's rate in hertz:
 
 ```c
@@ -551,12 +719,14 @@ work();
 rv_clock_read(CLOCK, &end, &hz);   /* (end - start) / hz seconds */
 ```
 
-A thread that cannot afford a call for each read, one that measures what the kernel does to it,
-reads the counter with a load instead, where the board lets user mode load one:
-the board then lists it among its devices, read only, as `BOOT_CAP_COUNTER`, section 3,
+Some threads cannot afford a system call for each read,
+for example a thread that measures what the kernel does to it.
+Such a thread can read the counter with a load instead, where the board allows user mode to load it.
+The board then lists the counter among its devices, read only, as `BOOT_CAP_COUNTER` (section 3),
 and the program installs that frame like any other.
-Its low 32 bits lie `COUNTER_OFFSET` into the frame, at the clock's rate,
-and wrap, after 71 minutes at a megahertz, so it takes differences of them:
+The counter's low 32 bits lie `COUNTER_OFFSET` bytes into the frame, and run at the clock's rate.
+They wrap around, after 71 minutes at one megahertz,
+so the program uses the difference between two reads:
 
 ```c
 uint32_t base, size;
@@ -569,21 +739,30 @@ spin();
 uint32_t counts = *low - at;
 ```
 
-The rate is the board's, 10 MHz on QEMU, the CPU clock on the ESP32-C6 and 1 MHz on RP2350,
-so a program takes it from `OP_CLOCK_READ`.
-`OP_CAP_INFO` on the clock tells the rate too, with no right, since it is not the time,
-and the default span, in counts of the counter, the longest power of two within a millisecond:
-how soon a request is due that no wait or bind gave a span for, which a program's own timing analysis works in, section 5.11.
-The time is the machine's, not the thread's: it includes other threads' slices.
+The rate depends on the board:
+10 MHz on QEMU, the CPU clock on the ESP32-C6, and 1 MHz on RP2350.
+So a program takes the rate from `OP_CLOCK_READ`.
+`OP_CAP_INFO` on the clock also tells the rate.
+It needs no right, because the rate is not the time.
+It also tells the default span, in counts of the counter:
+the longest power of two of counts that fits in a millisecond.
+The default span says how soon a request is due when no wait or bind gave a span (section 5.11).
+A program's own timing analysis works in it.
+The time is the machine's time, not the thread's: it includes the time that other threads ran.
 `rdtime` traps on every board.
-The ESP32-C6's performance counter is no clock: it is the process's, and stops whenever another process runs, section 3.
+The ESP32-C6's performance counter is not a clock.
+It belongs to the process, and it stops whenever another process runs (section 3).
 
 **The watchdog.**
-With `RIGHT_W`, `OP_CLOCK_WATCHDOG` arms the machine's watchdog, or feeds it:
-the machine halts with code 7 unless the call comes again within the microseconds it names, ten seconds at most.
-Nothing disarms it, and there is one for the machine, which every clock with `RIGHT_W` feeds.
-What it watches is the feeder's to decide: a root task that feeds it only once each child has said it is well
-halts a machine whose children hang, where one that feeds it from its own loop halts only a machine where the root task hangs.
+With `RIGHT_W`, `OP_CLOCK_WATCHDOG` arms the machine's watchdog, or feeds it.
+The machine halts with code 7 unless the call comes again within the given number of microseconds.
+The limit is ten seconds.
+Nothing disarms the watchdog.
+The machine has one watchdog, and every clock capability with `RIGHT_W` feeds it.
+The feeder decides what the watchdog watches.
+For example, a root task can feed it only after each child has reported that it is well.
+Then the machine halts when a child hangs.
+A root task that feeds it from its own loop halts the machine only when the root task itself hangs.
 
 ```c
 rv_clock_watchdog(CLOCK, 2000000);            /* arm: two seconds */
@@ -599,59 +778,68 @@ for (;;) {
 
 ### 5.9 Interrupts
 
-A driver holds an `IrqLine` capability naming one line.
-The root task receives every line of the controller at boot, with the log's,
-and every timer line in a second capability,
-and carves single lines out with `OP_IRQ_CARVE`,
-as it makes frames of memory.
+A driver holds an `IrqLine` capability that names one line.
+At boot, the root task receives every line of the interrupt controller, including the log's line,
+and it receives every timer line in a second capability.
+It carves single lines out with `OP_IRQ_CARVE`, as it makes frames out of memory.
 
-`OP_IRQ_BIND` turns a one-line capability into an `Irq` object
-in a pool of the driver's choosing,
-bound to a notification in any pool.
+`OP_IRQ_BIND` turns a one-line capability into an `Irq` object.
+The `Irq` lies in a pool that the driver chooses,
+and it is bound to a notification in any pool.
 The invoked slot is consumed.
-A line is bound at most once; a second bind fails with `KERR_OVERLAP`
-until the first `Irq`'s pool is destroyed.
-Where each core has a controller of its own and the kernel runs on several,
-the line they interrupt each other on is bound to the kernel for good, and binding it fails so too:
-line 6 on mps2-an521 and line 26 on RP2350's Cortex-M33, each with both cores.
+A line can be bound only once.
+A second bind fails with `KERR_OVERLAP` until the first `Irq`'s pool is destroyed.
 
-An `Irq` holds its notification by a capability
+Some boards have a separate interrupt controller for each core, and the kernel runs on several cores.
+There, the cores interrupt each other on one line.
+That line belongs to the kernel for good, and binding it also fails with `KERR_OVERLAP`.
+It is line 6 on mps2-an521, and line 26 on RP2350's Cortex-M33, each with both cores.
+
+An `Irq` holds its notification through a capability
 derived from the `Notification` capability it was bound with,
-as a thread holds its process, section 5.6.
-Revoking below that capability, or destroying the pool the notification lies in,
-takes the notification from the `Irq`, which is disarmed and its line masked for good:
-`OP_IRQ_SET` refuses it with `KERR_STATE`, and the line stays bound until the `Irq`'s own pool goes.
+as a thread holds its process (section 5.6).
+Two things take the notification away from the `Irq`:
+revoking below that capability,
+or destroying the pool that the notification lies in.
+The `Irq` is then disarmed, and its line is masked for good:
+`OP_IRQ_SET` refuses it with `KERR_STATE`.
+The line stays bound until the `Irq`'s own pool is destroyed.
 
 An `Irq` on a device's line works like one on a timer line:
 
 - `OP_IRQ_SET` with bits **arms** it, which unmasks the line at the controller.
 - When the line fires, the kernel masks the line,
   disarms the `Irq` and signals the bits.
-- The driver services the device and arms the `Irq` again,
-  which is the acknowledgement: only the driver lifts the mask.
+- The driver services the device and arms the `Irq` again.
+  This is the acknowledgement: only the driver lifts the mask.
 - `OP_IRQ_SET` with zero bits masks the line by hand.
 
-An `Irq` is armed exactly while its line is unmasked,
-so a level that stays high costs one trap and not a storm.
-The first core takes every device interrupt, whichever core its driver runs on;
-where each core has a controller of its own, as on mps2-an521 and on RP2350 of either kind,
-an arm or a disarm made on another core reaches the first core's as that core next enters the kernel,
-which the call interrupts it for, so the line may come that much later, and a disarmed one never signals.
-A device interrupt wakes its driver but does not run it;
-the driver waits for its turn like a thread a timer line woke.
+An `Irq` is armed exactly while its line is unmasked.
+So a level-triggered interrupt that stays high costs one trap, not a storm of traps.
+
+The first core takes every device interrupt, whichever core its driver runs on.
+Some boards have a separate controller for each core: mps2-an521, and RP2350 with either kind of core.
+There, an arm or a disarm made on another core reaches the first core's controller
+when the first core next enters the kernel.
+The call interrupts the first core for this.
+So the line may come that much later, and a disarmed line never signals.
+
+A device interrupt wakes its driver, but does not run it.
+The driver waits for its turn, like a thread that a timer line woke.
 
 Sharing a line between drivers is not supported;
-`DESIGN.md`, open decision 11.
+see `DESIGN.md`, open decision 11.
 
 ### 5.10 The kernel log
 
-The kernel writes every byte it prints, `OP_PRINT`'s included,
-into a ring behind a header of `RVUOS_LOG_HEADER` bytes,
-and never waits for a reader.
-The ring's size is the kernel's `KLOG_SIZE`, 4 KiB less the header today;
-the header reports it, so a reader need not assume it.
-`BOOT_CAP_LOG` names the header and the ring;
-the root task installs it like a device's registers and reads without a system call.
+The kernel writes every byte it prints into a ring,
+including the bytes that `OP_PRINT` writes.
+The ring follows a header of `RVUOS_LOG_HEADER` bytes.
+The kernel never waits for a reader.
+The ring's size is the kernel's `KLOG_SIZE`: 4 KiB minus the header today.
+The header reports the size, so a reader does not need to assume it.
+`BOOT_CAP_LOG` names the header and the ring.
+The root task installs it like a device's registers, and reads it without system calls.
 
 ```c
 struct rvuos_log {
@@ -662,147 +850,268 @@ struct rvuos_log {
 ```
 
 Byte `n` lies at offset `RVUOS_LOG_HEADER + n % size`.
-Once `head - taken` exceeds `size`, bytes have been overwritten
-and the oldest byte still kept is `head - size`;
-a reader that finds itself that far behind resets `taken` accordingly.
+When `head - taken` is larger than `size`, bytes have been overwritten.
+The oldest byte still kept is then `head - size`.
+A reader that finds itself that far behind sets `taken` to that value.
 
 The log is a device with interrupt line `LOG_IRQ_LINE`, which is 0.
-The line is level: high while `head` lies past `taken`.
-A reader binds and arms it as it would a UART's,
+The line is level-triggered: it is high while `head` is past `taken`.
+A reader binds and arms the line as it would a UART's line,
 and writes `taken` to acknowledge.
-Arming while bytes are untaken signals at once.
-The log's line cannot wake the machine from an idle stall:
-only the kernel writes the log, and with no thread runnable
-nothing runs that could make it write,
-so an idle kernel with only the log's `Irq` armed halts with `no runnable thread`.
-The line cannot be fired by `OP_TEST_IRQ` either.
+Arming while some bytes are not taken yet signals at once.
 
-`user/init/logger.c` shows the reader:
-a logger thread that waits on one notification with the log's bit and the UART's,
-and carries the ring out one byte per transmitter interrupt.
-`user/wifi/logger.c` is a reader the root task gave the frame to, which carries the ring over the network
-and moves `taken` only as far as its host says it has the bytes, so a halt writes out what no host had.
+The log's line cannot wake the machine from an idle stall.
+Only the kernel writes the log,
+and when no thread can run, nothing runs that could make the kernel write.
+So an idle kernel whose only armed `Irq` is the log's halts with `no runnable thread`.
+`OP_TEST_IRQ` cannot fire the line either.
+
+`user/init/logger.c` shows a reader:
+a logger thread waits on one notification, with one bit for the log and one for the UART,
+and copies the ring out one byte per transmitter interrupt.
+`user/wifi/logger.c` is a reader that the root task gave the frame to.
+It sends the ring over the network.
+It moves `taken` only as far as its host confirms it has the bytes,
+so a halt writes out whatever no host has received yet.
 
 ### 5.11 Scheduling
 
-- Each core is divided into `TIME_UNITS` units of time, 64, each a sixty-fourth of it.
-  The units of every core are numbered one core after the other:
-  the first core's are 0 to 63, the second's 64 to 127, and so on.
-  The root task receives them all in `BOOT_CAP_TIME`, its own thread earning every one of the first core's in its first place,
-  and hands them out with `OP_TIME_CARVE` and `OP_CAP_DERIVE` as it hands out memory.
-  `OP_CAP_INFO` on `BOOT_CAP_TIME` tells its count, `TIME_UNITS` for each core,
-  so a program learns how many cores there are from it.
-- A thread has **places**, as many as its creator asked for with `OP_POOL_ALLOC`, from one to the machine's cores,
-  each empty or holding the time of one core, never two of them one core's.
-  A thread runs on the cores its places hold the time of, and on no other.
-  A bind's units must all be of one core; a bind to none gives the thread spare time on the core of the first unit named.
-  A bind fills the place that holds that core's time, or an empty one, and fails with `KERR_LIMIT` with none;
-  a thread with one place moves to another core only once its place is emptied, by a revoke above its units;
-  a place bound to none without `RIGHT_X` holds its core's time all the same, and runs there on lent time alone.
-  A ready thread waits on the queues of every core it holds the time of, and the first core to take it runs it;
-  while it runs on one, the others do not see it, and it joins their queues again as its turn ends.
-  A thread whose place on a core is emptied while it runs there leaves that core as the trap ends, unless it may run on there on spare time.
-  `OP_CAP_INFO` on a thread tells its places and the cores they hold the time of.
-- `OP_TIME_BIND` binds a thread's place to some of a capability's units, or to none of them,
-  and the thread **earns** them there.
-  A unit is earned by one thread at a time:
-  a bind that names a unit another thread earns fails with `KERR_OVERLAP`,
-  so copies of a `Time` capability may be held by many, and each unit still goes to one thread.
-  The time of the units nobody earns is spare.
-- A thread bound through a capability with `RIGHT_X` also runs on **spare time**:
-  turns no thread with time wants, which cost it nothing.
-  The boot grant has `RIGHT_X`.
-  A thread bound through a capability without it runs on its units alone,
-  at most its units' part of each span of its core and a request,
-  and the core sleeps in `wfi` for the rest if nothing else wants it.
-  A thread bound to no units runs on spare time alone, or not at all without `RIGHT_X`.
-- Each place of a thread has a **virtual time**, a count of the clock its units have paid for its running up to:
-  each count the thread runs on `u` units moves it on `TIME_UNITS / u` counts, counted on the machine's counter,
-  whether the timer ends the turn or the thread waits;
-  a turn on spare time costs nothing of its units, though it moves the virtual time on too, up to a span ahead of the clock.
-  A thread that runs its units' part keeps its virtual time at the clock, and one that runs more puts it ahead.
-  A bind keeps a place's virtual time, and the units it leaves keep it too,
-  so a place bound to other units takes the latest of its own and theirs; units nobody earned since boot keep none.
-  A thread's units on one core promise it their part of that core only while it runs on none of its other cores,
-  since a turn elsewhere puts it at the back of their queues; to every other thread they promise what they did.
-- A thread runs in **requests**, each due a span past the virtual time it starts at:
-  the span its last wait gave, `OP_NOTIFY_WAIT` or `OP_NOTIFY_LEND`, or its binding's, `OP_TIME_BIND`, sections 6.9 and 6.13,
-  or the default span for none, the longest power of two of counts within a millisecond, which `OP_CAP_INFO` on a `Clock` tells, section 6.16.
-  A request is over once the thread has run its units' part of the span, its virtual time having reached the deadline.
-  A request starts as the thread is made ready or bound, and the next as one is over,
-  at the latest of its virtual time and the clock, and only once its virtual time lies at most a span ahead of the clock.
-  A thread has **time** on a core while it has a request open there or its virtual time lies within a span of the clock.
-  So a thread that wants the core all along runs about a span ahead, and is due after a thread that wakes with a span no longer.
-  A thread that waits gives up the rest of its request, and saves nothing for later by waiting.
-- Ready threads wait for the processor in three queues, which each core has.
-  A thread with time waits on the run queue;
-  one without time waits on the spare queue if it may run on spare time,
-  and for its virtual time to come within a span of the clock if not.
-  A thread that becomes ready, whether resumed, woken, bound or preempted,
-  joins the back of its queue.
-  The thread whose request is due first on the run queue runs,
-  or, if the run queue is empty, the one that has waited longest on the spare queue,
-  which runs for its span while another waits for spare time.
-  A thread made ready whose request is due before the running thread's takes the processor at once,
-  and as the running thread's request ends, the timer takes the processor from it if another is due first,
-  or if its units give it no next request yet.
-  A turn on spare time is one no thread with time wants, so it ends as soon as one wants it:
-  a thread with time that becomes ready while its core runs a turn on spare time takes the processor at once,
-  as the call or the interrupt that made it ready returns,
-  after the running thread has made again a call that stopped for an interrupt, if it stands at one.
-- A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its units, section 5.12:
-  a borrower without time on a core waits on its run queue while its lender's units give it time there,
-  and the turns it takes so move the lender's virtual time on that core.
-- There is no tick: the kernel sets each core's timer for the first count that could change what runs,
-  a timer line's deadline, a virtual time that comes, or the end of the running request while it matters,
-  so a thread alone on the processor is not interrupted at all.
-- So a thread with `u` units whose virtual time is at or behind the clock, woken within a span `s`,
-  has run `u * s / TIME_UNITS` counts of the counter within `s` of its wake, or waits again before, whatever the other threads do,
-  besides the kernel's longest step and the switches, while tracing is off and the thread keeps its binding.
-  A thread that ran ahead of its units is later by what it ran ahead, a request at most.
-  A driver that must do work of `c` within `D` of its interrupt waits within the longest power of two of counts that `D` holds,
-  `s`, and is given `TIME_UNITS * c / s` units at least.
-  A shorter span brings its requests nearer and makes them shorter, and costs the thread a switch for each while another thread waits;
-  a longer one puts them behind shorter ones.
-  A span costs no other thread anything, so a wait needs no right to give one.
-  A thread with work all along gets its units' part of the processor, give or take a request;
-  `DESIGN.md`, "Scheduling", says what a request promises and what a periodic task needs of its units.
-  A thread a process adds earns only units split off the process's own, or runs on spare time:
-  it takes nothing another thread earns.
-- A thread given fewer units than its work needs is not refused: it is served a request at a time,
-  and while another thread with time wants the core, each request after the first waits about a span,
-  which spare time hides while the core is otherwise idle.
-  The switch to a thread is charged to it, and one unit at the default span is a request about as long as that switch:
-  2048 cycles at the ESP32-C6's 160 MHz, 1200 at the RP2350's 150 MHz, near half of `make bench`'s `threads` round,
-  and 512 at the nRF52840's 64 MHz, about a sixth of the switch there.
-  A request shorter than that switch runs nothing of its own.
-  So a thread on an event's way earns the units for its work and its switch,
-  that work measured while no other thread takes the core from it, since a cycle counter a process's threads share counts them all.
-- `OP_THREAD_OVERRUNS`, with `RIGHT_R` on a thread, tells how many of its requests it ran to the end of without waiting.
-  A thread whose units fit its work runs none out, whatever the other threads do, so a count that grows says they do not.
-- A system call is never interrupted:
-  machine mode runs with interrupts off from the trap to the return.
-  On several cores one call runs at a time, whichever core makes it, and another core's call waits for it.
-- When nothing is runnable and an `Irq` is armed on a timer line or a device's line,
-  or a thread waits for its virtual time to come,
-  the kernel stalls in `wfi` until the nearest timer line's deadline, the virtual time that comes or the interrupt arrives,
-  and takes no interrupt in between.
-  On several cores a core with nothing to run waits so while another runs, which wakes it when it gives it a thread.
-  When no core runs a thread and there is none of these, it prints `no runnable thread` and halts with code 5,
-  watchdog or not.
+In short:
+each core's time is divided into units, and a thread is bound to some of them.
+The kernel runs the thread whose request is due first (earliest deadline first).
+Threads with time go before threads on spare time,
+which is the time of units that nobody earns.
+The rest of this section gives the details.
 
+**Units of time.**
+Each core is divided into `TIME_UNITS` units of time, 64.
+Each unit is a sixty-fourth of the core.
+The units of all cores are numbered one core after another:
+the first core's units are 0 to 63, the second core's are 64 to 127, and so on.
+The root task receives all of them in `BOOT_CAP_TIME`.
+At boot, the root task's own thread earns every unit of the first core, in its first place.
+The root task hands units out with `OP_TIME_CARVE` and `OP_CAP_DERIVE`, as it hands out memory.
+`OP_CAP_INFO` on `BOOT_CAP_TIME` tells its count, `TIME_UNITS` for each core.
+So a program learns from it how many cores there are.
+
+**Places.**
+A thread has **places**.
+Its creator chooses how many with `OP_POOL_ALLOC`: from one to the number of cores.
+Each place is empty, or holds the time of one core.
+Two places of one thread never hold the time of the same core.
+A thread runs only on the cores whose time its places hold.
+
+A bind's units must all belong to one core.
+A bind to no units gives the thread spare time on the core of the first unit named.
+A bind fills the place that already holds that core's time, or else an empty place.
+If there is neither, the bind fails with `KERR_LIMIT`.
+A thread with one place moves to another core only after its place is emptied,
+by a revoke above its units.
+A place can be bound to no units through a capability without `RIGHT_X`.
+It still holds its core's time, and the thread runs there on lent time only.
+
+A ready thread waits in the queues of every core whose time it holds.
+The first core to take it runs it.
+While it runs on one core, the other cores do not see it.
+It joins their queues again when its turn ends.
+If a thread's place on a core is emptied while the thread runs there,
+the thread leaves that core when the trap ends,
+unless it may go on running there on spare time.
+`OP_CAP_INFO` on a thread tells its places, and the cores whose time they hold.
+
+**Earning units.**
+`OP_TIME_BIND` binds a thread's place to some of a capability's units, or to none of them.
+The thread then **earns** those units there.
+Only one thread at a time earns a unit.
+A bind that names a unit that another thread earns fails with `KERR_OVERLAP`.
+So many threads can hold copies of one `Time` capability, and each unit still goes to one thread.
+The time of the units that nobody earns is **spare time**.
+
+**Spare time.**
+A thread bound through a capability with `RIGHT_X` also runs on spare time.
+Spare time is turns that no thread with time wants, and they cost the thread nothing.
+The boot grant has `RIGHT_X`.
+A thread bound through a capability without `RIGHT_X` runs on its units only.
+It gets at most its units' share of each span of its core, plus one request.
+If nothing else wants the core for the rest of the time, the core sleeps in `wfi`.
+A thread bound to no units runs on spare time only,
+or does not run at all without `RIGHT_X`.
+
+**Virtual time.**
+Each place of a thread has a **virtual time**.
+It is the count of the clock up to which the thread's units have paid for its running.
+Each count that the thread runs on `u` units moves it forward by `TIME_UNITS / u` counts,
+measured on the machine's counter.
+This is the same whether the timer ends the turn or the thread waits.
+A turn on spare time costs the thread nothing of its units.
+It still moves the virtual time forward, but only up to a span ahead of the clock.
+A thread that runs exactly its units' share keeps its virtual time at the clock.
+A thread that runs more moves its virtual time ahead of the clock.
+
+A bind keeps a place's virtual time,
+and the units that a bind leaves keep it too.
+So a place that is bound to other units takes the later of its own virtual time and theirs.
+Units that nobody earned since boot keep none.
+
+A thread's units on one core promise it their share of that core
+only while the thread runs on none of its other cores,
+because a turn on another core puts it at the back of their queues.
+To every other thread, they promise the same as before.
+
+**Requests.**
+A thread runs in **requests**.
+Each request is due one span after the virtual time it starts at.
+The span is the one given last:
+
+- A wait gives a span with `OP_NOTIFY_WAIT` or `OP_NOTIFY_LEND` (section 6.9).
+  A wait that gives no span keeps the span the thread had.
+- A bind gives a span with `OP_TIME_BIND` (section 6.13).
+  A bind that gives no span sets the default span.
+
+The default span is the longest power of two of counts that fits in a millisecond.
+`OP_CAP_INFO` on a `Clock` tells it (section 6.16).
+
+A request is over once the thread has run its units' share of the span,
+that is, once its virtual time has reached the deadline.
+A request starts when the thread is made ready or bound,
+and the next request starts when one is over.
+It starts at the later of the thread's virtual time and the clock,
+and only once the virtual time is at most a span ahead of the clock.
+A thread has **time** on a core while it has a request open there,
+or while its virtual time is within a span of the clock.
+So a thread that wants the core all the time runs about a span ahead,
+and is due later than a thread that wakes with a span that is not longer.
+A thread that waits gives up the rest of its request.
+Waiting does not save anything for later.
+
+**Queues.**
+Each core has three queues of ready threads.
+
+- A thread with time waits in the run queue.
+- A thread without time that may run on spare time waits in the spare queue.
+- A thread without time that has units, but may not run on spare time, waits in the spent queue,
+  until its virtual time comes within a span of the clock.
+
+A thread that becomes ready joins the back of its queue,
+whether it was resumed, woken, bound or preempted.
+The kernel runs the thread on the run queue whose request is due first.
+If the run queue is empty, it runs the thread that has waited longest on the spare queue.
+That thread runs for its span while another thread waits for spare time.
+
+A thread that is made ready, and whose request is due before the running thread's request,
+takes the processor at once.
+When the running thread's request ends, the timer takes the processor from it in two cases:
+another thread is due first,
+or the running thread's units do not give it a next request yet.
+
+A turn on spare time is one that no thread with time wants,
+so it ends as soon as such a thread wants the core.
+A thread with time that becomes ready while its core runs a turn on spare time
+takes the processor at once,
+as the call or the interrupt that made it ready returns.
+If the running thread stands at a call that stopped for an interrupt,
+it first makes that call again.
+
+**Lending.**
+A thread that waits with `OP_NOTIFY_LEND` lends its units to the thread it names (section 5.12).
+A borrower without time on a core waits in that core's run queue
+while its lender's units give it time there.
+The turns it takes this way move the lender's virtual time on that core.
+
+**No tick.**
+There is no periodic tick.
+The kernel sets each core's timer for the first count that could change what runs:
+a timer line's deadline,
+a virtual time that comes,
+or the end of the running request, while that matters.
+So a thread that is alone on the processor is not interrupted at all.
+
+**What a thread is promised.**
+Take a thread with `u` units whose virtual time is at or behind the clock,
+and which is woken with a span `s`.
+Within `s` of its wake, it has run `u * s / TIME_UNITS` counts of the counter,
+or it has waited again before that.
+This holds whatever the other threads do,
+while tracing is off and the thread keeps its binding.
+The kernel's longest step and the switches can add to the time `s`.
+A thread that ran ahead of its units is late by what it ran ahead, at most one request.
+
+For example, a driver must do work of `c` counts within `D` counts of its interrupt.
+It waits with a span `s`: the longest power of two of counts that fits in `D`.
+It needs at least `TIME_UNITS * c / s` units.
+
+A shorter span makes the thread's requests come sooner, and makes them shorter.
+It costs the thread a switch for each request while another thread waits.
+A longer span puts its requests behind shorter ones.
+A span costs no other thread anything, so a wait needs no right to give one.
+A thread that always has work gets its units' share of the processor, give or take a request.
+`DESIGN.md`, "Scheduling", says what a request promises,
+and what a periodic task needs of its units.
+A thread that a process adds earns only units split off the process's own units,
+or runs on spare time.
+It takes nothing that another thread earns.
+
+**Too few units.**
+A thread that has fewer units than its work needs is not refused.
+It is served one request at a time.
+While another thread with time wants the core,
+each request after the first one waits about a span.
+Spare time hides this while the core is otherwise idle.
+
+The switch to a thread is charged to that thread.
+One unit at the default span gives a request of about the size of that switch:
+
+- 2048 cycles at the ESP32-C6's 160 MHz,
+- 1200 cycles at the RP2350's 150 MHz, near half of `make bench`'s `threads` round,
+- 512 cycles at the nRF52840's 64 MHz, about a sixth of the switch there.
+
+A request shorter than the switch runs nothing of the thread's own work.
+So a thread on the path of an event earns units for its work and for its switch.
+Measure that work while no other thread takes the core from it,
+because a cycle counter that a process's threads share counts the work of all of them.
+
+**Overruns.**
+`OP_THREAD_OVERRUNS`, with `RIGHT_R` on a thread,
+tells how many of the thread's requests it ran to the end without waiting.
+A thread whose units fit its work runs out none of its requests, whatever the other threads do.
+So a count that grows says that its units do not fit its work.
+
+**System calls.**
+A system call is never interrupted:
+machine mode runs with interrupts off from the trap to the return.
+On several cores, one call runs at a time, on whichever core makes it,
+and a call on another core waits for it.
+
+**When nothing can run.**
+Sometimes nothing is runnable,
+but an `Irq` is armed on a timer line or a device's line,
+or a thread waits for its virtual time to come.
+Then the kernel stalls in `wfi` until the nearest timer line's deadline,
+the virtual time that comes, or the interrupt,
+and takes no interrupt in between.
+On several cores, a core with nothing to run waits in the same way while another core runs.
+The other core wakes it when it gives it a thread.
+When no core runs a thread and none of these things is pending,
+the kernel prints `no runnable thread` and halts with code 5,
+with or without a watchdog.
+
+**No priorities.**
 There are no priorities and no yield.
-A spinning thread cannot starve the others, because the end of its request preempts it while another is due first,
-but it burns its turns and puts its virtual time ahead, and keeps the machine out of `wfi`
-unless it is held to its units;
-a thread that waits costs nothing until it is signalled.
+A spinning thread cannot starve the others,
+because the end of its request preempts it while another thread is due first.
+But it uses up its turns, moves its virtual time ahead,
+and keeps the machine out of `wfi`, unless it is held to its units.
+A thread that waits costs nothing until it is signalled.
 
-A turn is charged by the counter, and a wait forgives none of it,
-so a thread that waits between bursts pays for the time it ran all the same.
+The counter measures each turn, and waiting does not undo any of it.
+So a thread that waits between bursts of work still pays for the time it ran.
 
-To hold a process to about a tenth of the processor, the root task gives it six units without `RIGHT_X`.
-Its own thread earns every unit at boot, so it leaves the six first,
-then carves them and lends them without spare time:
+**Example: a tenth of the processor.**
+To hold a process to about a tenth of the processor,
+the root task gives it six units without `RIGHT_X`.
+The root task's own thread earns every unit at boot.
+So the root task first binds its thread to the first 58 units only, to free the last six.
+Then it carves those six and lends them without spare time:
 
 ```c
 rv_time_bind(BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 58, 0);
@@ -810,27 +1119,38 @@ rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, 58, 6, TIME);
 rv_invoke(OP_CAP_DERIVE, CHILD_TABLE, CHILD_TIME, TIME, RIGHT_W);
 ```
 
-The child binds its threads through `CHILD_TIME` with `OP_TIME_BIND`;
-`TIME` itself keeps `RIGHT_X`, so a bind through it would give spare time too.
-Revoking below `TIME` takes the child's units back, and its threads stop.
+The child binds its threads through `CHILD_TIME` with `OP_TIME_BIND`.
+`TIME` itself keeps `RIGHT_X`, so a bind through it would also give spare time.
+Revoking below `TIME` takes the child's units back, and the child's threads stop.
 
 ### 5.12 Lent time
 
-A thread that waits may lend another thread its time meanwhile:
-`OP_NOTIFY_LEND` waits on a notification as `OP_NOTIFY_WAIT` does, and names the borrower
-through a capability to its thread with `RIGHT_X`, which lends it time and allows nothing else.
-A borrower without time of its own on a core, section 5.11, runs there on the units of the thread that has lent it time longest,
-if that one holds the time of the core too, and the turns it takes so move that thread's virtual time;
-a lender whose own time pays for its turn hands the rest of it to the borrower at once, if the borrower waits for a turn.
-A signal from the borrower that wakes the lender hands it the rest of the turn back.
-A borrower that lends in turn, having no time for its own borrower, passes on what it borrows,
-so a client's time pays for its server and for whatever that server waits on, through up to 64 lenders,
-and only on a core every one of them holds the time of.
+While a thread waits, it can lend its time to another thread.
+`OP_NOTIFY_LEND` waits on a notification like `OP_NOTIFY_WAIT`, and also names the borrower.
+It names the borrower through a capability to the borrower's thread with `RIGHT_X`.
+That right allows lending time to the thread, and nothing else.
 
-So a thread waiting for whoever holds a lock lends it its time, and so does a client waiting for its server's answer:
-a holder or a server with few units keeps a waiter with many no longer than its work takes.
-`lib/lock.h` has a lock that names its holder in its word, so that its takers know whom to lend to,
-and a hold nobody else wants still makes no system call, section 8.4.
+A borrower that has no time of its own on a core (section 5.11)
+runs there on the units of the thread that has lent it time the longest,
+if that thread also holds the time of that core.
+The turns it takes this way move that lender's virtual time.
+If the lender's own time pays for its current turn,
+it hands the rest of that turn to the borrower at once, if the borrower waits for a turn.
+A signal from the borrower that wakes the lender hands the rest of the turn back.
+
+A borrower can itself lend, when it has no time for its own borrower.
+It then passes on what it borrows.
+So a client's time pays for its server, and for whatever that server waits on.
+This works through up to 64 lenders,
+and only on a core whose time all of them hold.
+
+So a thread that waits for a lock's holder lends the holder its time,
+and a client that waits for its server's answer does the same.
+A holder or a server with few units then keeps a waiter with many units waiting
+no longer than its work takes.
+`lib/lock.h` has a lock that stores the name of its holder in its word,
+so that the threads that want to take it know whom to lend to.
+Taking and giving back the lock when nobody else wants it makes no system call (section 8.4).
 
 ```c
 /* each thread names itself, here 1, and holds the others' threads with RIGHT_X, here the thread named 2 */
@@ -840,33 +1160,53 @@ named_lock_take(&lock);
 named_lock_give(&lock);
 ```
 
-A name that is wrong costs the waiter the time it lends, and nothing else.
-A waiter whose borrower is destroyed wakes with `KERR_INVALID_CAP` and no bits, as one whose notification is,
-so a taker learns that the holder its lock names is gone, and may take the lock over.
-A holder that faults keeps the lock, stopped, and its watcher hears it, section 5.6,
-and so does a holder stopped with `OP_THREAD_STOP`, which nobody hears: takers that lend to it wait on.
-A stopped borrower keeps its lenders, whose time buys it nothing until it is resumed,
-and a stopped lender lends nothing more: a stop takes it off its wait, and its borrower's ring of lenders.
-A stopped lender whose time pays for the borrower's turn pays to the end of that turn, at its request's end or the borrower's wait.
-A lock keeps nobody from the memory it guards: that is the regions' work.
+A wrong name costs the waiter the time it lends, and nothing else.
+If the borrower is destroyed, the waiter wakes with `KERR_INVALID_CAP` and no bits,
+just as when its notification is destroyed.
+So a taker learns that the holder its lock names is gone, and can take the lock over.
+
+A holder that faults is stopped, and keeps the lock.
+Its watcher hears about the fault (section 5.6).
+A holder stopped with `OP_THREAD_STOP` also keeps the lock, but nobody hears about it,
+and the takers that lend to it keep waiting.
+A stopped borrower keeps its lenders,
+but their time buys it nothing until it is resumed.
+A stopped lender lends nothing more:
+a stop takes it off its wait, and off its borrower's ring of lenders.
+If a stopped lender's time pays for the borrower's current turn,
+it pays until that turn ends: at the end of its request, or at the borrower's wait.
+
+A lock does not keep anybody from the memory it guards.
+Regions do that.
 
 ### 5.13 Routes
 
-Some chips wire an event of one device to a task of another in hardware, so that the one starts the other
-with no thread in between, within a cycle or two of the event:
-a timer's compare that starts a radio's sending, a radio's end of frame that counts in a timer.
-A deadline shorter than a thread's wait for its turn is met that way or not at all, since a driver in user mode
-runs only when its turn comes, section 5.11.
-The kernel lends the chip's channels as it lends interrupt lines.
-The root task receives every channel it lends in `BOOT_CAP_ROUTES`, a `RouteLine`, and carves single channels out with `OP_ROUTE_CARVE`;
-on a board without a router the slot is empty, and on QEMU's boards four channels wire nothing, for tests.
+Some chips connect an event of one device to a task of another device in hardware.
+The event then starts the task with no thread in between, within a cycle or two.
+For example, a timer's compare event can start a radio's sending,
+or a radio's end-of-frame event can make a timer count.
+Some deadlines are shorter than a thread's wait for its turn.
+They can be met only this way,
+because a driver in user mode runs only when its turn comes (section 5.11).
 
-`OP_ROUTE_BIND` turns a one-channel capability into a `Route` object in a pool of the driver's choosing,
-connected to nothing and disarmed, and consumes the invoked slot; a channel is bound at most once.
-`OP_ROUTE_END` connects the `Route`'s event and its task, each by a `Frame` capability over the device it lies in,
-with `RIGHT_R` for the event and `RIGHT_W` for the task, and the end's name within the frame, which the board gives, section 3.
-`OP_ROUTE_SET` arms the `Route`, once both ends are connected, and disarms it.
-A wire triggers only what the driver could trigger by writing the frames itself; it moves no data.
+The kernel lends the chip's channels, as it lends interrupt lines.
+The root task receives every channel that the kernel lends in `BOOT_CAP_ROUTES`, a `RouteLine`.
+It carves single channels out with `OP_ROUTE_CARVE`.
+On a board without a router, the slot is empty.
+On QEMU's boards, four channels exist for tests, and they connect nothing.
+
+`OP_ROUTE_BIND` turns a one-channel capability into a `Route` object, in a pool the driver chooses.
+The new `Route` is connected to nothing and disarmed.
+The call consumes the invoked slot.
+A channel can be bound only once.
+
+`OP_ROUTE_END` connects the `Route`'s event or its task.
+Each end is given by a `Frame` capability over the device it lies in:
+with `RIGHT_R` for the event, and `RIGHT_W` for the task.
+The call also takes the end's name within the frame, which the board defines (section 3).
+`OP_ROUTE_SET` arms the `Route` once both ends are connected, and it also disarms the `Route`.
+A route triggers only what the driver could trigger by writing to the frames itself.
+It moves no data.
 
 ```c
 /* TIMER4 counts every frame the radio ends: its COUNT task on the radio's END event */
@@ -877,31 +1217,52 @@ rv_invoke(OP_ROUTE_END, ROUTE, ROUTE_TASK, BOOT_CAP_TIMER4, 0x008); /* TASKS_COU
 rv_invoke(OP_ROUTE_SET, ROUTE, 1, 0, 0);
 ```
 
-A `Route` holds each end by a capability derived from the `Frame` capability it was connected through,
-so whoever lent the device takes the wire back by revoking below its frame, which disarms the `Route`;
-connecting an end it had disarms it, so it never wires a new end to the other's old partner.
-The destroy of the `Route`'s pool disarms it too, and frees the channel.
+A `Route` holds each end through a capability
+derived from the `Frame` capability it was connected through.
+So whoever lent the device takes the connection back by revoking below its frame,
+and this disarms the `Route`.
+Connecting an end that the `Route` already had also disarms it.
+So a `Route` never connects a new end to the other end's old partner.
+Destroying the `Route`'s pool disarms it too, and frees the channel.
 
 ### 5.14 DMA
 
-A device that moves bytes by itself, a DMA controller's channel, frees the CPU from feeding it a word at a time,
-but it reaches whatever it is pointed at, PMP or not.
-So where a board's DMA controller lies apart from the devices it feeds, the kernel keeps its registers
-and lends its channels, as it lends a router's, and points a channel only at memory the driver holds.
-The root task receives every channel it lends in `BOOT_CAP_DMA`, a `DmaLine`, and carves single channels out with `OP_DMA_CARVE`;
-on a board that lends none the slot is empty, and on QEMU's boards four channels move nothing, for tests.
+A DMA controller's channel moves bytes by itself.
+This saves the CPU from feeding a device one word at a time.
+But the channel reaches whatever address it is given, and PMP does not stop it.
+So on boards where the DMA controller is separate from the devices it feeds,
+the kernel keeps the controller's registers to itself.
+It lends the channels, as it lends a router's channels,
+and points a channel only at memory that the driver holds.
 
-`OP_DMA_BIND` turns a one-channel capability into a `Dma` object in a pool of the driver's choosing,
-connected to nothing and moving nothing, and consumes the invoked slot; a channel is bound at most once.
-`OP_DMA_END` connects the `Dma`'s source and its sink, each by a `Frame` capability, with `RIGHT_R` for the source and `RIGHT_W` for the sink.
-The board says which end of each channel lies in memory, named 0, and the other is a device,
-named by the request the controller takes for it, through a frame over the device's registers; section 3.
-`OP_DMA_START` moves the bytes at an offset into the memory end's frame, of a length,
-whole grains of the board's and at most its longest transfer, section 3; the device paces them.
-The kernel checks the range, so a driver cannot point a channel past its own frame, whatever it writes meanwhile;
-a channel moves nothing the driver could not move by loads and stores to the two frames, only without the CPU.
-`OP_CAP_INFO` tells whether a transfer may still reach the memory, and a start while one may fails with `KERR_STATE`;
-`OP_DMA_STOP` stops it before its end.
+The root task receives every channel that the kernel lends in `BOOT_CAP_DMA`, a `DmaLine`.
+It carves single channels out with `OP_DMA_CARVE`.
+On a board that lends no channel, the slot is empty.
+On QEMU's boards, four channels exist for tests, and they move nothing.
+
+`OP_DMA_BIND` turns a one-channel capability into a `Dma` object, in a pool the driver chooses.
+The new `Dma` is connected to nothing and moves nothing.
+The call consumes the invoked slot.
+A channel can be bound only once.
+
+`OP_DMA_END` connects the `Dma`'s source or its sink, each through a `Frame` capability:
+with `RIGHT_R` for the source, and `RIGHT_W` for the sink.
+The board says which end of each channel is memory; that end is named 0.
+The other end is a device.
+It is named by its DMA request number, which the controller takes for it,
+through a frame over the device's registers (section 3).
+
+`OP_DMA_START` moves bytes at an offset into the frame of the memory end, for a given length.
+The length is a whole number of the board's grains,
+and at most the board's longest transfer (section 3).
+The device sets the pace.
+The kernel checks the range,
+so a driver cannot point a channel past its own frame, whatever it writes in the meantime.
+A channel moves only what the driver could move with loads and stores to the two frames;
+it just does so without the CPU.
+`OP_CAP_INFO` tells whether a transfer may still reach the memory.
+A start while one may still do so fails with `KERR_STATE`.
+`OP_DMA_STOP` stops a transfer before its end.
 
 ```c
 /* SPI2 sends n bytes from offset of FRAME, which the program maps too, while the program goes on */
@@ -913,9 +1274,13 @@ rv_invoke(OP_DMA_END, DMA, DMA_SINK, BOOT_CAP_SPI2, DMA_REQUEST_SPI2);
 rv_invoke(OP_DMA_START, DMA, offset, n, 0);
 ```
 
-A `Dma` holds each end by a capability derived from the `Frame` capability it was connected through,
-so whoever lent the memory or the device takes it back by revoking below its frame,
-which stops the channel before the revoke returns, a transfer under way or not;
-connecting an end it had stops it too, and so does the destroy of the `Dma`'s pool, which frees the channel.
-The bytes a transfer reads may change while it runs, which is the driver's affair:
-it writes the next ones into another buffer, or waits for the transfer's end.
+A `Dma` holds each end through a capability
+derived from the `Frame` capability it was connected through.
+So whoever lent the memory or the device takes it back by revoking below its frame.
+This stops the channel before the revoke returns, whether a transfer is running or not.
+Connecting an end that the `Dma` already had also stops the channel.
+So does destroying the `Dma`'s pool, which also frees the channel.
+
+The bytes that a transfer reads may change while it runs.
+This is the driver's responsibility:
+it writes the next bytes into another buffer, or it waits for the transfer to end.
