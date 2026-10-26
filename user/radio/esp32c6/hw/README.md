@@ -9,6 +9,7 @@ What is known of the ESP32-C6's modem, a file a block:
 | `i154.md` | the IEEE 802.15.4 MAC |
 | `btbb.md` | the BLE and IEEE 802.15.4 baseband |
 | `dump.md` | the dump engine, which copies what the receiver hears into SRAM |
+| `rftest.md` | Espressif's RF test tool and its firmware as a source: how it loads and talks, its commands and the blocks each reaches |
 
 A fact says where it comes from and how sure it is:
 **known**, a source names it, an ESP-IDF header, a `libphy` debug string or a library function's name;
@@ -53,7 +54,7 @@ What it read, measured on one board in runs on channels 1 and 6 and on 8 and 13:
 | 0x600A9800 | MODEM_SYSCON | 0x9824, 0x02206300 | 0x40, to 0x600A9C00 | ESP-IDF's `modem_syscon_reg.h` |
 | 0x600AD000 | the Wi-Fi MAC's timer, a block of 1 KiB | 0x3F8, 0x02207040 | 0x400, to 0x600AE000 | `mac.c` |
 | 0x600AF000 | MODEM_LPCON | 0xF02C, 0x02206240 | 0x40, to 0x600AF400 | ESP-IDF's `modem_lpcon_reg.h` |
-| 0x600AF400 | not known: a few words from 0xF49C, zero before the bring-up | 0xF4E4, 0x02203141 | 0x100, to 0x600AF800 | |
+| 0x600AF400 | not named: a few words from 0xF49C, zero before the bring-up; two of its bits select the protocol of a forced radio, below | 0xF4E4, 0x02203141 | 0x100, to 0x600AF800 | `rftest.md`'s firmware |
 | 0x600AF800 | i2c_mst, the analog I2C's master | 0xF834, 0x02201300 | 0x40, to 0x600AFC00 | `libphy`, `phy.c` |
 | 0x600AFC00 | i2c_mst's command memory | | 0x100, to 0x600B0000 | `libphy`, `phy.c` |
 
@@ -61,6 +62,12 @@ What it read, measured on one board in runs on channels 1 and 6 and on 8 and 13:
   and the 802.15.4 MAC's 0x184, and each of the others reads as a date of 2020 to 2022, 0x0YYMMDDn,
   at or near its block's end; so a date word marks a block and its extent, as a hypothesis.
   Two blocks no source names show so, at 0x600A9400 and 0x600AF400.
+- **The block at 0x600AF400.** No source names it, but Espressif's RF test firmware, see `rftest.md`, writes two of its bits (known, the functions named):
+  - `0x600AF4B4` bit 0: librftest's `force_rx_gain` and `force_txon_mode` write it to the AND of their Bluetooth and force arguments, after `phy_dis_hw_set_freq_1`.
+    So it selects Bluetooth's or 802.15.4's side over Wi-Fi's for a forced receive gain or transmit (inferred).
+  - `0x600AF4B8` bit 0: the image's `zb_tx` sets it for its whole run and clears it at the end, inside the modem clock mode 3 of `rftest.md`.
+    What it gates is not known.
+  Nothing was run that touches either.
 - **The copies.** A block that decodes fewer of the address's bits than its window spans repeats in it,
   and a read of a copy answers the block's word; whether a write to a copy reaches the block is not tried.
 - **Nothing there.** 0x600AA000 to 0x600AD000 reads zero, each read answered at once;

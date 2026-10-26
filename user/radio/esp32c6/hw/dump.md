@@ -42,6 +42,10 @@ The words, as `adctrig` writes them and the board answered:
 | HP_SYSTEM `SRAM_USAGE` `0x60095004` | 8 to 11 | a bit a 128 KiB bank of SRAM, set the engine's | ESP-IDF's `hp_system_reg.h`; `adctrig` sets bit 10, the bank at `0x40840000` |
 | | 16 | `MAC_DUMP_ALLOC`, the bank's upper 64 KiB | ESP-IDF's `hp_system_reg.h` |
 
+The RF test library's `set_dump_mode(n)`, which its `loop_dump_test` calls before each loopback's capture on channel 14, writes two more words (known, its pseudo-C):
+it clears `FECTRL` 0x600A0958's bits 0 and 1, `phy.c`'s `FECTRL_AGC_0`, and writes `agc` 0x600A70B8's bits 0 to 2 as 1 where `n` is 0, else 0.
+A mode of the capture by its name; neither word was tried.
+
 A capture writes from the bank's first word, as many words as it takes,
 each two 10-bit two's complement samples, bits 10 to 19 the in-phase and 0 to 9 the quadrature,
 then the receiver's gain in bits 20 to 27, on Wi-Fi's side its index in 20 to 26, see `phy.md`,
@@ -292,7 +296,8 @@ bits 0 to 13 a count, bits 15 and 19 set or cleared by two of its arguments, bit
 bit 31 set, then a wait for bit 18, as a capture waits for its own; after 10 ms it clears the capture control.
 An engine that sends what the bank holds, as a hypothesis from that.
 On the ESP32-C6, and the C5, C61, H2, S31 and C2, `dactrig` only fills the bank, `0x40840000` on the C6, and writes no register,
-and `fedump_wr_txmem` returns at once: if the C6 has a player, its library no longer says where.
+and `fedump_wr_txmem` returns at once, as `fedump_rd_txmem` and `fedump_rd_rxmem` do,
+in the library and in the RF test tool's shipped image alike, see `rftest.md`: if the C6 has a player, its library no longer says where.
 Eight bytes past the C6's capture control, `0x600A9004`, is `0x600A900C`, and it is the player (measured, below).
 
 `prog/dacprobe.c` reads the block's words and, with `write=1`, writes each of the unexplained ones with a count and bit 31,
