@@ -20,6 +20,9 @@ which also tells what the receive header's time and the sniffer's masks showed, 
 - The key table lies at 0x600A5800, `mac.c`'s `KEY_BASE`.
 - From 0x600A5C00 to 0x600A6400 the words read the same in every pass and every run, halfwords below 0x600A6000
   and whole words above, and no bring-up writes them: a memory left as it powered up, as a hypothesis.
+  On the C5 the same addresses hold the receiver's FFT and EVM dump, which its libraries read from 0x600A5C00,
+  and the C6's ROM has the C5's set-up of a channel dump, `phy_chan_dump_cfg_rom` writing `NRX_INIT_5` 0x600A790C,
+  see `../../esp32c5/hw/dump.md`: so the C6's words may be such a dump's memory, never yet filled, as a hypothesis no run has tried.
 - The receive base, 0x600A4084, read 0x00800000 after the libraries' `wifi_reset_mac` in three runs,
   before the driver's own list is written there;
   how the MAC makes an address of it is not known, and read as their 0x4086e138 is, without bit 30,

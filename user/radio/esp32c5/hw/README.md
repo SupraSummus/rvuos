@@ -7,6 +7,7 @@ this file's sections from "The modem's frame, measured" on say what runs on the 
 | File | Subject |
 |---|---|
 | `phy.md` | the PHY: the band switch, the analog I2C and its blocks, the PA's current trim, per-channel quirks |
+| `dump.md` | the dump engine as the C5's `adctrig` drives it, the DPD path's loopback, the FFT and EVM dump, and no player |
 | `rftest.md` | the C5's side of Espressif's RF test firmware: its commands, its stubs, its init parameters |
 | `regs.md` | every MMIO word the libraries touch with a constant address, by block, with the functions that touch it |
 
