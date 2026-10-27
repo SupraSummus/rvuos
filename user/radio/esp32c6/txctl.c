@@ -15,6 +15,14 @@ void txctl_start(struct txctl *c, uint32_t rates, uint32_t start, uint32_t seed)
     c->prng = seed != 0 ? seed : 0x9e3779b9u; /* xorshift32 stays at 0 once there */
 }
 
+void txctl_rates(struct txctl *c, uint32_t rates)
+{
+    c->rates = rates;
+    if (c->at >= rates) {
+        c->at = rates - 1u;
+    }
+}
+
 uint32_t txctl_rate(const struct txctl *c, uint32_t try)
 {
     uint32_t i = c->at + (try < 2u ? 0u : try - 1u);

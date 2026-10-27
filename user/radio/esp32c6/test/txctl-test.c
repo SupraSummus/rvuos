@@ -103,6 +103,8 @@ static void rates(void)
     check(c.at == 0, "the fastest is the top");
     first_tries(&c, 1000, 0);
     check(c.at == RATES - 1u, "the slowest is the bottom");
+    txctl_rates(&c, RATES - 1u);
+    check(c.at == RATES - 2u && txctl_rate(&c, 7) == RATES - 2u, "a band without the slowest holds the next");
 }
 
 int main(void)

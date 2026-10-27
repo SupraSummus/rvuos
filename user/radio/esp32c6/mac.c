@@ -512,31 +512,28 @@ static void hold(void)
     block();
 }
 
-#ifdef RADIO_MAC_C5
 int mac_channel_may_tune(uint32_t channel)
 {
-    return (channel >= MAC_CHANNEL_FIRST && channel <= MAC_CHANNEL_LAST) ||
-           (channel >= 36u && channel <= 64u && channel % 4u == 0) || (channel >= 100u && channel <= 140u && channel % 4u == 0);
+    if (channel >= MAC_CHANNEL_FIRST && channel <= MAC_CHANNEL_LAST) {
+        return 1;
+    }
+#ifdef RADIO_MAC_C5
+    return channel % 4u == 0 && ((channel >= 36u && channel <= 64u) || (channel >= 100u && channel <= 140u));
+#else
+    return 0;
+#endif
 }
 
 int mac_channel_may_send(uint32_t channel)
 {
-    return (channel >= MAC_CHANNEL_FIRST && channel <= MAC_CHANNEL_LAST) ||
-           (channel >= 36u && channel <= 48u && channel % 4u == 0);
+    return mac_channel_may_tune(channel) && channel <= 48u;
 }
-#endif
 
 const char *mac_channel(uint32_t channel)
 {
-#ifdef RADIO_MAC_C5
     if (!mac_channel_may_tune(channel)) {
-        return "the channel, not one of 1 to 13, 36 to 64 or 100 to 140";
+        return "the channel, not one the radio may be tuned to";
     }
-#else
-    if (channel < MAC_CHANNEL_FIRST || channel > MAC_CHANNEL_LAST) {
-        return "the channel, not one of 1 to 13";
-    }
-#endif
     hold();
     drv_phy_channel(channel);
 #ifdef RADIO_MAC_C5
@@ -727,7 +724,8 @@ void mac_rx_on(void)
 /*
  * The rates, fastest first, by the PHY's code, as their wifi_phy_rate_t numbers them:
  * OFDM's eight, whose codes are the RATE field of the OFDM SIGNAL, and 802.11b's 1 Mb/s, code 0,
- * which every station takes, and which management frames and frames to a group go at.
+ * which every station takes on 2.4 GHz. 5 GHz has no 802.11b, so its rates are the first eight.
+ * Management frames and frames to a group go at the band's slowest.
  * The response, the acknowledgement, comes at the rate their mac_tx_get_rts_rate picks for the frame's.
  * A try's power is libphy's, phy_get_max_pwr's for the rate and for its response's, in TX_PWR's bytes 0, 2 and 3,
  * as their hal_mac_tx_set_ppdu writes it; the driver asks again after each retune, as it may follow the channel.
@@ -743,7 +741,6 @@ static const struct tx_rate tx_rates[MAC_TX_RATES] = {
     { 0x0e, 0x0a, 18000 }, { 0x0a, 0x0a, 12000 }, { 0x0f, 0x0b, 9000 },  { 0x0b, 0x0b, 6000 },
     { 0x00, 0x00, 1000 },
 };
-#define TX_LOWEST (MAC_TX_RATES - 1u)
 #define TX_START  3u /* 24 Mb/s, the rate an access point's data starts at */
 
 extern int phy_get_max_pwr(uint8_t rate, int8_t *pwr); /* libphy's, which their hal_init_tx_pwr calls */
@@ -752,11 +749,7 @@ static uint32_t tx_pwr[MAC_TX_RATES]; /* each rate's TX_PWR word, asked since th
 
 static uint32_t pwr_word(uint32_t i)
 {
-#ifdef RADIO_MAC_C5
     int8_t own[3] = { 0, 0, 0 }, resp[3] = { 0, 0, 0 }; /* the ESP32-C5's libphy.a writes three bytes */
-#else
-    int8_t own[2] = { 0, 0 }, resp[2] = { 0, 0 };
-#endif
     phy_get_max_pwr(tx_rates[i].code, own);
     phy_get_max_pwr(tx_rates[i].resp, resp);
     return (uint32_t)(uint8_t)own[0] | (uint32_t)(uint8_t)resp[0] << 16 | (uint32_t)(uint8_t)resp[1] << 24;
@@ -771,6 +764,12 @@ struct mac_tx_counts mac_tx_counts;
 
 /* Each try's rate and backoff, txctl.c's, its generator seeded from the chip's, too slow to draw each try from. */
 static struct txctl ctl;
+
+/* The rates of the band of the channel tuned to, which mac_tx_send holds the control to. */
+static uint32_t tx_band_rates(void)
+{
+    return rx.channel > MAC_CHANNEL_LAST ? MAC_TX_RATES - 1u : MAC_TX_RATES;
+}
 
 static void tx_control_start(void)
 {
@@ -1049,13 +1048,12 @@ const char *mac_tx_send(uint32_t len, uint32_t keyslot)
         osi_mutex_give(&tx_lock);
         return "the frame's length";
     }
-#ifdef RADIO_MAC_C5
     if (!mac_channel_may_send(rx.channel)) {
         osi_mutex_give(&tx_lock);
         return "the channel, one the MAC only listens on";
     }
-#endif
     uint32_t c = begun_cycles;
+    txctl_rates(&ctl, tx_band_rates());
     wake_locked();
     if (!tx_pwr_asked) {
         for (uint32_t i = 0; i < MAC_TX_RATES; i++) {
@@ -1077,7 +1075,7 @@ const char *mac_tx_send(uint32_t len, uint32_t keyslot)
         if (t > 0) {
             tx->frame[TX_HDR + 1] |= TX_RETRY;
         }
-        end = try(len, data ? txctl_rate(&ctl, t) : TX_LOWEST, txctl_backoff(&ctl, t), group, keyslot);
+        end = try(len, data ? txctl_rate(&ctl, t) : ctl.rates - 1u, txctl_backoff(&ctl, t), group, keyslot);
         prof_add(&drv_prof.tx_air, (uint32_t)(osi_now_us() - armed_us));
         if (t == 0) {
             prof_add(&drv_prof.tx_prep, armed_cycles - c);

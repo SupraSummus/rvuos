@@ -57,6 +57,6 @@ The decompiled bodies the C5's branches were read from are Ghidra's, through the
 The station sends only what a station sends, from its own address, to the maintainer's own access points,
 on the channels the EU lets a station use without detecting radar itself:
 2.4 GHz's channels 1 to 13, and 5 GHz's 36 to 48, 5150 to 5250 MHz, indoors.
-It hears the channels of DFS, 52 to 144, without sending, and nothing from 149 up.
+It hears the channels of DFS, 52 to 140, without sending, and nothing from 149 up.
 Its power stays at or below what `libphy.a` would set for the channel and rate, 23 dBm EIRP at most on 5 GHz,
 and the limits are checked in the code, not only kept by care.

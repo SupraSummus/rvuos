@@ -454,7 +454,7 @@ static void configure(struct drv *p)
     uint32_t blast = config_number(conf, size, "blast", 0);
     p->blast = (uint8_t)(blast <= 30u ? blast : 30u);
     uint32_t channel = config_number(conf, size, "listen", 0);
-    p->listen = (uint8_t)(channel <= 13 ? channel : 0);
+    p->listen = (uint8_t)(channel <= 0xffu ? channel : 0); /* the MAC refuses one it may not be tuned to */
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
     p->trace = config_number(conf, size, "trace", 0); /* 1: the root serves each access; 2: the window with no fault */
     trace_wanted = p->trace != 0;

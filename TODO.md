@@ -319,12 +319,9 @@ what is left:
 
 - Wi-Fi on both bands, see `user/radio/esp32c5/README.md`: the station and the network process over the MAC,
   which hears both bands on `libphy.a`; then a PHY of its own in the library's place, as on the ESP32-C6.
-  On 5 GHz the station sends on channels 36 to 48 alone, and hears the channels of DFS, 52 to 144, without sending.
+  On 5 GHz the station sends on channels 36 to 48 alone, and hears the channels of DFS, 52 to 140, without sending.
 - One run of `prog/listen.c` in about eight heard nothing on channel 1, on both of its visits, while 11 and 40 heard
   their access points and a computer beside the board heard channel 1's; not understood, nor seen again.
-- When the ESP32-C6's MAC next changes, and its gate runs anyway: `mac_channel_may_tune` and `mac_channel_may_send`
-  for both chips, so that `mac_channel` and `mac_tx_send` lose their `RADIO_MAC_C5` branches,
-  and `pwr_word`'s three bytes for both.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
 - `scene=veins` keeps in step with the refresh every fourth at 160 MHz, 15 pictures a second,

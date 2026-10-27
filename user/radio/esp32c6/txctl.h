@@ -39,6 +39,9 @@ struct txctl {
 /* The control started for rates rates, holding rate start, its backoffs drawn from seed. */
 void txctl_start(struct txctl *c, uint32_t rates, uint32_t start, uint32_t seed);
 
+/* The rates the band has, the table's first rates; the rate held, if past them, their slowest. */
+void txctl_rates(struct txctl *c, uint32_t rates);
+
 /* The index of the rate a frame's try goes at, its first try 0. */
 uint32_t txctl_rate(const struct txctl *c, uint32_t try);
 

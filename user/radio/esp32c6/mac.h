@@ -18,19 +18,22 @@
 
 #include <stdint.h>
 
+#include "radio.h" /* the board's */
+
 /*
- * The channels the radio may be tuned to, 2.4 GHz's 1 to 13, as Europe allows:
+ * The channels the radio may be tuned to, as Europe has them: 2.4 GHz's 1 to 13,
+ * and on the ESP32-C5 5 GHz's 36 to 64 and 100 to 140 too, up to MAC_CHANNEL_TOP;
  * mac_channel refuses any other, wherever the number came from, a beacon heard among them.
+ * The MAC sends on 2.4 GHz's channels and on 5 GHz's 36 to 48 alone, 5150 to 5250 MHz, which a station uses without
+ * detecting radar itself; it only listens on the others, those of DFS, and mac_tx_send refuses them.
  */
 #define MAC_CHANNEL_FIRST 1u
 #define MAC_CHANNEL_LAST  13u
-
-/*
- * On the ESP32-C5 the radio may be tuned to 5 GHz's channels too, 36 to 64 and 100 to 140 as Europe has them,
- * but the MAC sends on 2.4 GHz's 1 to 13 and 5 GHz's 36 to 48 alone, 5150 to 5250 MHz, which a station uses without
- * detecting radar itself; it only listens on the others, those of DFS. mac_tx_send refuses any other channel.
- * Only the ESP32-C5's build defines the two; the ESP32-C6's checks 1 to 13 where it tunes.
- */
+#ifdef RADIO_MAC_C5
+#define MAC_CHANNEL_TOP 140u
+#else
+#define MAC_CHANNEL_TOP MAC_CHANNEL_LAST
+#endif
 int mac_channel_may_tune(uint32_t channel);
 int mac_channel_may_send(uint32_t channel);
 
@@ -197,8 +200,8 @@ void mac_default_policy(const uint8_t mac[6]);
 void mac_station(const uint8_t sta[6], const uint8_t bssid[6]);
 
 /*
- * The radio on another channel, MAC_CHANNEL_FIRST to MAC_CHANNEL_LAST, as the libraries' chm_phy_change_channel
- * retunes it, the MAC held meanwhile; 0, or why not, a channel outside them left untuned.
+ * The radio on another channel, one it may be tuned to, as the libraries' chm_phy_change_channel
+ * retunes it, the MAC held meanwhile; 0, or why not, any other channel left untuned.
  */
 const char *mac_channel(uint32_t channel);
 

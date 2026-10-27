@@ -166,7 +166,7 @@ struct drv {
     uint8_t ps;           /* sleep between beacons once joined, the radio off while the link is idle; see sta.c */
     uint8_t blast;        /* seconds the station sends a datagram to its port 9 back to its sender, as fast as the MAC
                              lets it: a test of the sending alone, once a run; see sta.c */
-    uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
+    uint8_t listen;       /* the channel to hear, one mac_channel takes, or 0 */
     char probe[33];       /* the network to probe for while listening, or empty */
     uint32_t i154_line;   /* the 802.15.4 MAC's line, DRV_LINE_I154, to a program that needs it, DRV_NEED_I154 */
     struct bulk_end link; /* which the driver lends the network process, connected before the start */

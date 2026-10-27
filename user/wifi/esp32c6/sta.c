@@ -225,7 +225,8 @@ static int scan_heard(const struct mac_frame *m)
 }
 
 /*
- * Every channel heard for a while, afresh, its access points into the page, strongest first; how many were heard.
+ * Every channel the station may send on heard for a while, afresh,
+ * its access points into the page, strongest first; how many were heard.
  * The root task's ask to leave cuts it short,
  * so that the station's thread, which leaves on its next wait, leaves in time.
  */
@@ -234,9 +235,11 @@ static uint32_t scan(struct drv *d)
     d->net_count = 0;
     mac_sniffer(1);
     drv_must_mac("the MAC receives into the driver's list", mac_rx_take(scan_heard));
-    for (uint32_t ch = MAC_CHANNEL_FIRST; ch <= MAC_CHANNEL_LAST && !d->leave; ch++) {
-        mac_channel(ch); /* one of those it tunes to, so never refused */
-        osi_delay_ms(SCAN_DWELL_MS);
+    for (uint32_t ch = MAC_CHANNEL_FIRST; ch <= MAC_CHANNEL_TOP && !d->leave; ch++) {
+        if (mac_channel_may_send(ch)) {
+            mac_channel(ch);
+            osi_delay_ms(SCAN_DWELL_MS);
+        }
     }
     mac_sniffer(0);
     mac_rx_give_back();
@@ -1962,7 +1965,11 @@ static int take(struct drv *d, const struct drv_net *ap)
     memcpy(sta.ap, ap->bssid, 6);
     drv_say("sta: %s at %02x:%02x:%02x:%02x:%02x:%02x, channel %u\n", ap->ssid, ap->bssid[0], ap->bssid[1],
             ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
-    /* The channel a beacon named, which mac_channel may refuse. */
+    /* The channel a beacon named, which mac_channel may refuse; one the station only listens on is passed over. */
+    if (!mac_channel_may_send(ap->channel)) {
+        drv_say("sta: channel %u is one the station only listens on\n", (unsigned)ap->channel);
+        return 0;
+    }
     const char *refused = mac_channel(ap->channel);
     if (refused != 0) {
         return give_up(refused, (uint32_t)ESP_FAIL);
