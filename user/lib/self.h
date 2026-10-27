@@ -36,6 +36,7 @@ struct block {
 #define SELF_WHOLES (1u + BOOT_RAM_BLOCKS) /* the free RAM and the board's further blocks, see mem_take */
 #define SELF_ROOM_UNIT 0x1000u /* what room for children's data is handed out in, see self_room */
 #define SELF_CORES  4u   /* the most cores it keeps account of the units of */
+#define SELF_REGION_MIN 128u /* no board's smallest region is larger: the ESP32-C5's PMP grain */
 
 struct self {
     /* Its capabilities, in its own table. */

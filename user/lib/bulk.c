@@ -24,7 +24,7 @@
 #define REF_BYTES  BULK_REF_BYTES
 #define OFF_BITS   BULK_OFF_BITS
 #define WANT_BYTES 8u  /* the two words that say a side asked for room */
-#define BLOCK_MIN  64u /* the smallest block, no smaller than any board's smallest region */
+#define BLOCK_MIN  SELF_REGION_MIN /* the smallest block, a region on every board */
 
 _Static_assert(BULK_SIZE_MAX <= 1u << OFF_BITS, "an offset fits below the buffer");
 _Static_assert(BULK_BUFFERS <= 1u << (32u - OFF_BITS), "a buffer's number fits above the offset");

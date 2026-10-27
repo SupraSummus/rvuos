@@ -141,8 +141,11 @@ enum net_state {
 #define CLIENT_READS  4u
 #define CLIENT_FILLS  4u
 
-/* The bytes of its page the network process publishes the network's addresses in, through lib/seqlock.h. */
-#define NET_CONFIG_SIZE 64u
+/*
+ * The bytes of its page the network process publishes the network's addresses in, through lib/seqlock.h:
+ * a region of their own on every board, which the clock is given.
+ */
+#define NET_CONFIG_SIZE SELF_REGION_MIN
 _Static_assert(SEQLOCK_BYTES(sizeof(struct sock_config)) <= NET_CONFIG_SIZE, "the addresses fit their bytes");
 
 struct net_page {
