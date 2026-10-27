@@ -26,6 +26,7 @@
 #define USJ_OUT_DATA 0x4u /* in EP1_CONF: the OUT FIFO holds a byte the host sent */
 #define USJ_OUT_RECV 0x4u /* interrupt: a packet came from the host */
 #define USJ_IN_EMPTY 0x8u /* interrupt: the host has taken everything */
+#define USJ_INT_ALL  0xffffu /* every interrupt, SOF to SET_LINE_CODE */
 
 /* Polls before the polled writer gives up on a host that takes nothing. */
 #define USJ_POLLS 1000000u
@@ -33,9 +34,18 @@
 static volatile uint32_t *console_regs;
 static bool console_dead;
 
+/*
+ * The controller keeps its interrupts' enables and latched events through a reset of the chip,
+ * which leaves its USB link up, so it holds what the program before asked:
+ * an IN_EMPTY a logger enabled stays raised while the host keeps up,
+ * and a program that waits on the line for OUT_RECV alone would be woken for it without end.
+ * So the console starts with every interrupt off and cleared, and console_start and console_listen enable theirs.
+ */
 static inline void console_init(uint32_t base)
 {
     console_regs = (volatile uint32_t *)base;
+    console_regs[USJ_INT_ENA] = 0;
+    console_regs[USJ_INT_CLR] = USJ_INT_ALL;
 }
 
 static inline void console_flush(void)
