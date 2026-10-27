@@ -157,6 +157,13 @@ void mac_rx_set_policy(uint32_t iface, uint32_t valid);
 void mac_queues_init(void);
 void mac_rx_base_init(uint32_t base);
 void mac_he_init(void);
+#ifdef RADIO_MAC_C5
+/*
+ * The libraries' hal_init_tx_pwr again, which mac_he_init runs at the start: the power table, and the responses' power
+ * words from it, for the band tuned to; the ESP32-C5's mac_channel runs it as the band changes.
+ */
+void mac_band_power(void);
+#endif
 void mac_rx_match_init(void);
 void mac_low_rate_disable(void);
 void mac_crypto_init(void);

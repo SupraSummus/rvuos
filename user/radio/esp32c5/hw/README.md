@@ -206,6 +206,10 @@ and paired with the other chip's:
   the pbus's readback, 0x600A0894 and 0x600A08A0, then missed bits a run that heard had.
   With WIFIBB and the front end's five resets, MODEM_RST_CONF bits 8 and 10 to 14, pulsed before the calibration,
   every run heard, `phy.c`.
+- The responses' power words, 0x600A4408 on, which `hal_init_imrsp_power` fills from `phy_get_max_pwr`'s table,
+  are the band's the table was asked on: `chm_set_current_band` asks it again through `hal_init_tx_pwr` as the band changes.
+  Asked on 2.4 GHz at the start, bits 8 to 13 held 0x14 on channel 40, where `libphy.a` gives every OFDM rate 0x12
+  or less there (**measured**, the words and the table read on the board); `mac_channel` asks again as the band changes.
 
 ## The PHY on libphy.a
 

@@ -538,6 +538,13 @@ const char *mac_channel(uint32_t channel)
     drv_phy_channel(channel);
 #ifdef RADIO_MAC_C5
     wr(CCA_BAND, (rd(CCA_BAND) & ~CCA_BAND_MASK) | (channel > MAC_CHANNEL_LAST ? CCA_BAND_5G : CCA_BAND_2G4));
+    /*
+     * The responses' power is the band's, as their chm_set_current_band asks it again with hal_init_tx_pwr:
+     * the start's are 2.4 GHz's, which on 5 GHz would send an acknowledgement above what libphy gives the band.
+     */
+    if ((channel > MAC_CHANNEL_LAST) != (rx.channel > MAC_CHANNEL_LAST)) {
+        mac_band_power();
+    }
 #endif
     rx.channel = channel;
     tx_pwr_asked = 0;

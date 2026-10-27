@@ -675,6 +675,13 @@ static void mac_init_tx_pwr(void)
     mac_init_imrsp_power();
 }
 
+#ifdef RADIO_MAC_C5
+void mac_band_power(void)
+{
+    mac_init_tx_pwr();
+}
+#endif
+
 void mac_he_init(void)
 {
     wr(HE_CTRL, rd(HE_CTRL) & ~0x80000000u);
