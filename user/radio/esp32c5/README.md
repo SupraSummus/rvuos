@@ -50,6 +50,8 @@ place set; `make BOARD=esp32c5 wifi-esp32c5-replay` checks that before it writes
 `make mac-replay-test-c5` in `make check`, but for interface 1's, the soft AP's, which `test/replay-expected.txt` names.
 The decompiled bodies the C5's branches were read from are Ghidra's, through the scripts of `user/radio/cyw43439/tools/ghidra/`.
 3. The station of `user/wifi/esp32c6/` over it, its scan, join and link, and the network process of `user/wifi/`.
+   `make BOARD=esp32c5 wifi-esp32c5` runs it as `wifi-esp32c6` runs the ESP32-C6's.
+   It joins on 2.4 GHz at 1 Mb/s, as the MAC sends no OFDM yet; see `TODO.md`.
 4. The PHY of its own, `libphy.a`'s functions taken one by one, as `user/radio/esp32c6/phy.c` took the ESP32-C6's.
 
 ## Sending within the law

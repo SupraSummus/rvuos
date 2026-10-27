@@ -16,6 +16,15 @@ WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(foreach n,$(sort $(notdir $(WIFI_
 # taken whole, see btbb.c, and the Wi-Fi's net80211 and pp with it: the radio's own MAC and start stand in their
 # place. glue.c stands for what libcore.a held.
 WIFI_ESP_LIBS :=
+WIFI_ESP_ROM  := $(RADIO_ESP_ROM)
+# On the ESP32-C5 the station's radio is that chip's programs', see user/radio/esp32c5/build.mk:
+# the files the two chips share, with the C5's PHY over libphy.a.
+ifeq ($(BOARD),esp32c5)
+WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(wildcard $(WIFI_ESP)/*.c)) \
+                 $(filter-out $(BUILD)/user/tracer/%,$(RADIO_C5_OBJ))
+WIFI_ESP_LIBS := $(RADIO_C5_LIBS)
+WIFI_ESP_ROM  := $(RADIO_C5_ROM)
+endif
 # The station's files include the radio's headers.
 $(BUILD)/$(WIFI_ESP)/%.o: CFLAGS += -I$(RADIO_ESP)
 # WIFI_CONFIG names the network to join, ssid=, pass= and bssid=, from a file git does not track, as for the Pico 2 W,
@@ -155,7 +164,7 @@ WIFI_ESP_HEAP := $(addprefix $(BUILD)/$(WIFI_ESP)/,ec.o hostap.o supp.o) $(addpr
 $(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(RADIO_ESP)/flash.ld
 	@! $(NM) -u $(filter-out $(WIFI_ESP_HEAP),$(filter $(BUILD)/$(WIFI_ESP)/% $(BUILD)/$(RADIO_ESP)/%,$(WIFI_ESP_OBJ))) | grep -E ' (osi_(m|c|re)alloc|os_(m|z)alloc|malloc|calloc)$$' \
 		|| { echo "$@: the driver's own code calls an allocator" >&2; exit 1; }
-	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(RADIO_ESP)/flash.ld $(foreach s,$(RADIO_ESP_ROM),-Wl,-T,$(s)) \
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(RADIO_ESP)/flash.ld $(foreach s,$(WIFI_ESP_ROM),-Wl,-T,$(s)) \
 		$(WIFI_ESP_OBJ) $(LIB_OBJ) -Wl,--start-group $(WIFI_ESP_LIBS) -Wl,--end-group -o $@
 
 $(BUILD)/wifi-drv.bin: $(BUILD)/wifi-drv.elf
@@ -175,6 +184,21 @@ wifi-esp32c6: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin $(SAE_TEST)
 else
 wifi-esp32c6:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6)
+endif
+
+# The same station on an ESP32-C5, its radio over libphy.a, see user/radio/esp32c5/README.md.
+.PHONY: wifi-esp32c5
+ifeq ($(BOARD),esp32c5)
+wifi-esp32c5: $(BUILD)/kernel-wifi-esp32c5.bin $(BUILD)/wifi-drv.bin $(RADIO_C5_ROM_ELF)
+	tools/wifi-run.py --console --save $(BUILD)/wifi-run.log \
+		$(foreach e,$(BUILD)/wifi-drv.elf $(BUILD)/kernel-wifi-esp32c5.elf $(RADIO_C5_ROM_ELF),--symbols $(e)) -- \
+		$(ESPTOOL_PYTHON) tools/esp32c6-run.py --chip esp32c5 --port $(PORT) \
+		--flash $(call board_hex,FLASH_WINDOW_FLASH,user/board/esp32c5/devices.h):$(BUILD)/wifi-drv.bin \
+		--text $(call board_hex,INPUT_FLASH,kernel/board/esp32c5/board.h):$(or $(WIFI_CONFIG),/dev/null) \
+		$(BUILD)/kernel-wifi-esp32c5.bin
+else
+wifi-esp32c5:
+	$(error the driver runs here on an ESP32-C5: make BOARD=esp32c5 wifi-esp32c5)
 endif
 
 # The medium shared with a Pico 2 W at the C6's access point, see tools/wifi-share.py:
