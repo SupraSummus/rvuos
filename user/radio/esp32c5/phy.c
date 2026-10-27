@@ -74,7 +74,7 @@ void phy_wifi_enable_set(uint8_t enable);
 int phy_change_channel(uint32_t mhz, uint32_t a1, uint32_t a2, uint32_t width);
 void phy_disable_low_rate(void);
 void phy_param_track_tot(bool en_wifi, bool en_ble_154);
-void set_bb_wdg(uint32_t enable, uint32_t a1, uint32_t busy, uint32_t idle);
+void set_bb_wdg(uint32_t enable, uint32_t a1, uint32_t busy, uint32_t idle, uint32_t a4, uint32_t a5, uint32_t a6);
 char *get_phy_version_str(void);
 
 extern const esp_phy_init_data_t phy_init_data; /* tools/esp-fetch.py's, from ESP-IDF's phy_init_data.c */
@@ -178,8 +178,11 @@ void drv_phy_track(void)
     phy_param_track_tot(true, false);
 }
 
-/* The baseband's watchdog as the station's start sets it: its busy check on, 0x18, its idle check off, 0xaa. */
+/*
+ * The baseband's watchdog as the station's start sets it: its busy check on, 0x18, its idle check off, 0xaa,
+ * and the three bits of its second word their call passes as zeros, 31 to 29 of 0x600A7C40, cleared.
+ */
 void drv_phy_busy_check(void)
 {
-    set_bb_wdg(1, 0, 0x18, 0xaa);
+    set_bb_wdg(1, 0, 0x18, 0xaa, 0, 0, 0);
 }
