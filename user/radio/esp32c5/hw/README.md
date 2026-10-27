@@ -191,6 +191,14 @@ and paired with the other chip's:
   as on the ESP32-C6; then a word more, so the power, the length, the response and the end lie 4 bytes further on:
   slot 0's at 0x600A54D8, 0x54E4, 0x54E8 and 0x5514, read from the ROM's `mac_tx_set_len` and `hal_mac_get_txq_complete`,
   and measured, as 1 Mb/s frames are acknowledged.
+- The modem's clock gating code while the PMU is active, `PMU_HP_ACTIVE_ICG_MODEM` 0x600B000C bits 31:30,
+  powers on as 0, which no clock domain's map holds, where ESP-IDF's bootloader sets 2 at every boot (**measured**):
+  with 0 the power detector's SAR reads zero, at 0x600A081C to 0x600A0828, so `register_chipv7_phy` never returns;
+  with 2, set and updated through the PMU's `IMM_MODEM_ICG` and `IMM_SLEEP_SYSCLK`,
+  the calibration ends and OFDM's frames go out and are acknowledged on both bands.
+  The PMU keeps the code through a reset, so a chip an ESP-IDF image ran on since its power came on calibrates without it,
+  as the board did after MicroPython's runs; those runs sent no OFDM frame, under a code that was not read.
+  The kernel sets 2 at boot.
 
 ## The PHY on libphy.a
 

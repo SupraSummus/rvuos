@@ -317,19 +317,13 @@ what is left:
 
 ## ESP32-C5
 
-- Wi-Fi on both bands, see `user/radio/esp32c5/README.md`: the station and the network process over the MAC,
-  which hears both bands on `libphy.a`; then a PHY of its own in the library's place, as on the ESP32-C6.
+- Wi-Fi's PHY of its own in `libphy.a`'s place, as on the ESP32-C6, see `user/radio/esp32c5/README.md`;
+  the station and the network process join on both bands over the library.
   On 5 GHz the station sends on channels 36 to 48 alone, and hears the channels of DFS, 52 to 140, without sending.
-- The MAC sends no OFDM frame, at any rate, on either band: only 802.11b's 1 Mb/s goes out.
-  The C6 as a sniffer hears the C5's probes at 1 Mb/s and nothing at 6 in the same run;
-  on 2.4 GHz an OFDM try ends with no acknowledgement, on 5 GHz with `lmacProcessTxError` code 0xa3.
-  The slot's words, the band word and the baseband's, FE's and LPCON's match ESP-IDF's on the chip.
-  Next: the analog I2C's registers against ESP-IDF's, and what the ROM's sending calls once the slot is armed.
-  Until then the station joins at 1 Mb/s on 2.4 GHz alone, `bssid=` naming the access point,
-  as the scan picks the strongest, often a 5 GHz one, where the authentication fails and no other is tried.
 - Channel 1's access point, at -82 dBm, goes unheard now and then: by `prog/listen.c` in one run of about eight,
   on both of its visits, while 11 and 40 heard theirs, and by the station's scan in some runs;
-  a computer beside the board hears it in every one. Not understood.
+  a computer beside the board hears it in every one. Not understood;
+  seen before the kernel set the modem's clock gating code, which may have left a part of the receiver unclocked.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
 - `scene=veins` keeps in step with the refresh every fourth at 160 MHz, 15 pictures a second,

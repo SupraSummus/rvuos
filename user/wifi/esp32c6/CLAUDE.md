@@ -17,7 +17,7 @@ which fails if the driver hears nothing, again with `listen=` and `probe=`,
 which fails if a probe is not sent or not answered, and again with neither, the driver's scan.
 
 With an ESP32-C5 connected, a change to the station or to the MAC runs `make BOARD=esp32c5 wifi-esp32c5` with a network named too,
-`bssid=` naming a 2.4 GHz access point while the C5 sends no OFDM, see `TODO.md`.
+once with `bssid=` naming a 2.4 GHz access point and once naming a 5 GHz one.
 
 A change to how the C6 sends, `mac.c`'s sending or `txctl.c`, with a Pico 2 W connected too,
 runs `make BOARD=esp32c6 wifi-esp32c6-share` with `SHARE_BEFORE` naming the driver image from before it:

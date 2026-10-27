@@ -282,6 +282,9 @@ For the radio's programs it lists, as the ESP32-C6 does, the SAR ADC, the whole 
 and a window onto flash at the same offset, `0x210000`, which the MMU shows from `0x42000000`;
 the bits of PCR, the PMU and LP_AON that Espressif's PHY library sets, the 5 GHz band's analog I2C buses among them,
 the kernel sets at boot, as there.
+It sets the modem's clock gating code for the PMU's active state too, which ESP-IDF's bootloader sets,
+as the code powers on as 0, which none of the maps the radio's programs give the modem's clock domains holds,
+so the domains' clocks stop, and the PMU keeps a code through a reset.
 The ROM's `ets_delay_us` counts in `mcycle`, which user mode cannot read whatever `mcounteren` says,
 so a program has a delay of its own over `OP_CLOCK_READ`, where the ESP32-C6's ROM counts in a user-mode counter.
 The kernel sets 160 MHz, as on the ESP32-C6: ESP-IDF's 240 MHz raises the core's voltage first,

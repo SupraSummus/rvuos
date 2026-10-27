@@ -118,6 +118,20 @@
 #define LP_AON_SAR2_PWDET_CCT   (7u << 29)
 #define LP_AON_SAR2_PWDET_CCT_4 (4u << 29)
 
+/*
+ * The modem's clock gating code while the PMU is active, which its clock domains' maps are read with:
+ * a domain whose map has the code's bit set keeps its clock. It powers on as 0, which no map a radio's program sets has,
+ * so the front end's power detector reads zero and the PHY's calibration never ends. ESP-IDF's bootloader sets 2,
+ * rtc_clk_modem_clock_domain_active_state_icg_map_preinit, and the code takes effect when the PMU is told to update it.
+ * The PMU keeps it through a reset, so a chip an ESP-IDF image ran on since its power came on calibrates without it.
+ */
+#define PMU_HP_ACTIVE_ICG_MODEM   0x600B000Cu
+#define PMU_ICG_MODEM_CODE_ACTIVE (2u << 30)
+#define PMU_IMM_SLEEP_SYSCLK      0x600B00D0u
+#define PMU_UPDATE_DIG_ICG_SWITCH (1u << 28)
+#define PMU_IMM_MODEM_ICG         0x600B00DCu
+#define PMU_UPDATE_ICG_MODEM      (1u << 31)
+
 /* LPPERI's RNG_CFG, whose low bit has the generator sample its ring oscillator. */
 #define LPPERI_RNG_CFG       0x600B2824u
 #define RNG_SAMPLE_ENABLE    (1u << 0)
@@ -202,6 +216,9 @@ void board_init(void)
     REG(PMU_RF_PWC) |= PMU_PERIF_I2C_RSTB;
     REG(PMU_IMM_HP_CK_POWER) = PMU_TIE_HIGH_XPD_BB_I2C;
     REG(LP_AON_SAR_CCT) = (REG(LP_AON_SAR_CCT) & ~LP_AON_SAR2_PWDET_CCT) | LP_AON_SAR2_PWDET_CCT_4;
+    REG(PMU_HP_ACTIVE_ICG_MODEM) = PMU_ICG_MODEM_CODE_ACTIVE;
+    REG(PMU_IMM_MODEM_ICG) = PMU_UPDATE_ICG_MODEM;
+    REG(PMU_IMM_SLEEP_SYSCLK) = PMU_UPDATE_DIG_ICG_SWITCH;
 
     REG(LPPERI_RNG_CFG) |= RNG_SAMPLE_ENABLE;
 
