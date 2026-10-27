@@ -320,10 +320,6 @@ what is left:
 - Wi-Fi's PHY of its own in `libphy.a`'s place, as on the ESP32-C6, see `user/radio/esp32c5/README.md`;
   the station and the network process join on both bands over the library.
   On 5 GHz the station sends on channels 36 to 48 alone, and hears the channels of DFS, 52 to 140, without sending.
-- Channel 1's access point, at -82 dBm, goes unheard now and then: by `prog/listen.c` in one run of about eight,
-  on both of its visits, while 11 and 40 heard theirs, and by the station's scan in some runs;
-  a computer beside the board hears it in every one. Not understood;
-  seen before the kernel set the modem's clock gating code, which may have left a part of the receiver unclocked.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
 - `scene=veins` keeps in step with the refresh every fourth at 160 MHz, 15 pictures a second,

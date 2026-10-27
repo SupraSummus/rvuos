@@ -199,6 +199,13 @@ and paired with the other chip's:
   The PMU keeps the code through a reset, so a chip an ESP-IDF image ran on since its power came on calibrates without it,
   as the board did after MicroPython's runs; those runs sent no OFDM frame, under a code that was not read.
   The kernel sets 2 at boot.
+- The baseband's and the front end's words outlive a reset of the chip too (**measured**, `prog/listen.c` dumping
+  the modem's frame at its start: some 2500 words not zero). Calibrated on what a run before left,
+  `libphy.a` left the receiver deaf on a band, a channel's beacons unheard for the whole run, in most runs after
+  one that heard, the AGC's 0x600A708C, low bits 3 or 0, and 0x600A7138, bits 13:12, telling the two apart at the start;
+  the pbus's readback, 0x600A0894 and 0x600A08A0, then missed bits a run that heard had.
+  With WIFIBB and the front end's five resets, MODEM_RST_CONF bits 8 and 10 to 14, pulsed before the calibration,
+  every run heard, `phy.c`.
 
 ## The PHY on libphy.a
 

@@ -24,6 +24,7 @@
 #define MODEM_SYSCON_CLK_CONF_POWER_ST (MODEM_SYSCON_BASE + 0x0Cu)
 #define MODEM_SYSCON_MODEM_RST_CONF    (MODEM_SYSCON_BASE + 0x10u)
 #define RST_WIFIMAC                    (1u << 9)
+#define RST_WIFIBB_FE                  0x7D00u /* WIFIBB, and FE_PWDET_ADC, FE_DAC, FE_ADC, FE_AHB and FE */
 #define MODEM_SYSCON_CLK_CONF1         (MODEM_SYSCON_BASE + 0x14u)
 #define MODEM_LPCON_BASE               0x600AF000u
 #define MODEM_LPCON_WIFI_LP_CLK_CONF   (MODEM_LPCON_BASE + 0x0Cu)
@@ -99,11 +100,18 @@ void drv_wifi_clock_enable(void)
     REG(MODEM_LPCON_CLK_CONF) |= CLK_WIFIPWR_EN | CLK_COEX_EN;
 }
 
+/*
+ * The baseband's and the front end's words outlive a reset of the chip, as their power and clocks do, and the
+ * calibration does not set them all: started on what a run before left, it went deaf on a band in most runs after one
+ * that heard, the AGC's 0x600A708C and 0x600A7138 telling which. So both are reset before it, as a power-on finds them.
+ */
 void drv_phy_on(void)
 {
     if (enabled++ == 0) {
         drv_phy_clock_enable();
         if (!calibrated) {
+            REG(MODEM_SYSCON_MODEM_RST_CONF) |= RST_WIFIBB_FE;
+            REG(MODEM_SYSCON_MODEM_RST_CONF) &= ~RST_WIFIBB_FE;
             drv_say("phy: %s\n", get_phy_version_str());
             for (int i = 0; i < 6; i++) {
                 cal_data.mac[i] = drv_self->mac[i];
