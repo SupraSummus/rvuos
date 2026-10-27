@@ -320,6 +320,10 @@ what is left:
 - Wi-Fi's PHY of its own in `libphy.a`'s place, as on the ESP32-C6, see `user/radio/esp32c5/README.md`;
   the station and the network process join on both bands over the library.
   On 5 GHz the station sends on channels 36 to 48 alone, and hears the channels of DFS, 52 to 140, without sending.
+- On 5 GHz the board misses the first try of many of the MikroTik's frames at 36 Mb/s and above,
+  ESP-IDF's own stack as much as the driver, where another access point's come whole, see `user/radio/esp32c5/hw/README.md`.
+  Open: whether the access point sending from both antennas does it, tried with one;
+  and whether the station keeps such an access point below 36 Mb/s, by the rates it lists, or joins with HT on 5 GHz.
 - 240 MHz, the chip's top clock, which ESP-IDF reaches with the core's voltage raised first, and on this revision only from below,
   IDF-11064; the kernel sets 160 MHz.
 - `scene=veins` keeps in step with the refresh every fourth at 160 MHz, 15 pictures a second,

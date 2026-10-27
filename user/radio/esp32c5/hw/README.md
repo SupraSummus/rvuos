@@ -210,6 +210,20 @@ and paired with the other chip's:
   are the band's the table was asked on: `chm_set_current_band` asks it again through `hal_init_tx_pwr` as the band changes.
   Asked on 2.4 GHz at the start, bits 8 to 13 held 0x14 on channel 40, where `libphy.a` gives every OFDM rate 0x12
   or less there (**measured**, the words and the table read on the board); `mac_channel` asks again as the band changes.
+- The access point's RTS frames are answered: an ESP32-C6 listening beside it heard the C5's CTS a SIFS after each,
+  and the access point's frame after it acknowledged (**measured**, on 2.4 GHz).
+- On 5 GHz the board misses the first try of many of the MikroTik access point's frames at 36 Mb/s and above,
+  the more the longer the frame, and hardly any at 24 Mb/s (**measured**).
+  It hears nothing of a missed try, no frame with a bad checksum, and the retry, behind RTS and CTS, comes whole.
+  ESP-IDF 5.5.4's own stack on the board, joined as an 802.11a station as the driver is, misses them alike,
+  so the driver does not cause it.
+  Neither the channel nor the level moves it: channels 40 and 44, -66 and -82 dBm, alike.
+  A phone's hotspot on channel 149 was heard whole at 48 and 54 Mb/s, at -52 and at -79 dBm,
+  so the loss lies between this access point's higher rates and the board's receiver;
+  the access point sending from both its antennas is a hypothesis.
+  Bits 15 to 29 of the reception header's word 4, a 15-bit signed value, read about -900 from the access point
+  and about +700 from the phone, which lost nothing,
+  so the frequency offset libphy's `phy_get_rx_freq` reads in such a value does not explain it.
 
 ## The PHY on libphy.a
 
