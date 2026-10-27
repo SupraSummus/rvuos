@@ -186,7 +186,11 @@ and paired with the other chip's:
 - The control header the MAC writes before a received frame is 64 bytes, the MAC's version 3, ESP-IDF's `esp_wifi_rxctrl_t`:
   the signal's length at byte 56 and the state at 60, where the ESP32-C6's header is shorter;
   measured too, as `prog/listen.c` reads beacons whole by it.
-- `chm_set_current_band` writes the low byte of 0x600A4C94, 0x20 for 2.4 GHz and 0x17 for 5 GHz, which the driver does not yet.
+- `chm_set_current_band` writes the low byte of 0x600A4C94, 0x20 for 2.4 GHz and 0x17 for 5 GHz, as `mac_channel` does.
+- A TX slot's PPDU block is 0x78 bytes, slot 0's at 0x600A54B0, PLCP1 first and the protection word next,
+  as on the ESP32-C6; then a word more, so the power, the length, the response and the end lie 4 bytes further on:
+  slot 0's at 0x600A54D8, 0x54E4, 0x54E8 and 0x5514, read from the ROM's `mac_tx_set_len` and `hal_mac_get_txq_complete`,
+  and measured, as 1 Mb/s frames are acknowledged.
 
 ## The PHY on libphy.a
 

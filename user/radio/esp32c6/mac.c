@@ -53,6 +53,11 @@
 #define PWR_STATUS       0x600ad0b0u /* the MAC's power events, which come with its interrupt */
 #define PWR_CLEAR        0x600ad0b4u
 #endif
+/* The ESP32-C5's band, in the word their hal_cca_set_snd20_cfg writes as chm_set_current_channel changes band. */
+#define CCA_BAND         (MAC_BASE + 0xc94u)
+#define CCA_BAND_MASK    0xffu
+#define CCA_BAND_2G4     0x20u
+#define CCA_BAND_5G      0x17u
 #define TX_BLOCK         (MAC_BASE + 0xca8u) /* holds the MAC still, as hal_mac_deinit sets it and hal_mac_init clears it */
 #define TX_BLOCK_ALL     0x00ff1000u
 #ifdef RADIO_MAC_C5
@@ -534,6 +539,9 @@ const char *mac_channel(uint32_t channel)
 #endif
     hold();
     drv_phy_channel(channel);
+#ifdef RADIO_MAC_C5
+    wr(CCA_BAND, (rd(CCA_BAND) & ~CCA_BAND_MASK) | (channel > MAC_CHANNEL_LAST ? CCA_BAND_5G : CCA_BAND_2G4));
+#endif
     rx.channel = channel;
     tx_pwr_asked = 0;
     mac_tx_block_clear();

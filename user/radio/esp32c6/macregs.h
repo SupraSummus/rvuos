@@ -117,11 +117,13 @@
 #define TX_QUEUE_STEP 0x10u
 #ifdef RADIO_MAC_C5
 #define TX_PPDU_STEP  0x78u
-#define TX_PPDU_TOP   0x14b4u /* slot 0's, so that its TX_RESP is the ESP32-C5's hal_attenna_init's first word; the other
-                                 fields' offsets in the block are the ESP32-C6's, not yet held to the C5's sending */
+#define TX_PPDU_TOP   0x14b0u
+#define TX_PPDU_MORE  0x04u /* the ESP32-C5's block holds a word more before TX_PWR, as its ROM's mac_tx_set_plcp1,
+                               hal_he_set_tx_protection, mac_tx_set_len and hal_mac_get_txq_complete place them */
 #else
 #define TX_PPDU_STEP  0x74u
 #define TX_PPDU_TOP   0x1488u
+#define TX_PPDU_MORE  0x00u
 #endif
 /*
  * The slots their start writes, eight: their hal_he_clr_multi_bssid and hal_attenna_init walk slot 0 to slot 7.
@@ -135,10 +137,10 @@
 #define TX_PPDU(s)     (MAC_BASE + TX_PPDU_TOP - (s) * TX_PPDU_STEP) /* PLCP1 first, then the slot's PPDU words */
 #define TX_PLCP1(s)    (TX_PPDU(s) + 0x00u)
 #define TX_PROT(s)     (TX_PPDU(s) + 0x04u) /* the protect threshold of hal_he_set_tx_protection */
-#define TX_PWR(s)      (TX_PPDU(s) + 0x24u) /* the frame's power and its response's, from libphy; see mac.c */
-#define TX_TXLEN(s)    (TX_PPDU(s) + 0x30u)
-#define TX_RESP(s)     (TX_PPDU(s) + 0x34u) /* the response's rate, and the antennas of hal_attenna_init */
-#define TX_DONE(s)     (TX_PPDU(s) + 0x60u) /* how the frame sent last ended, which hal_mac_get_txq_complete reads */
+#define TX_PWR(s)      (TX_PPDU(s) + TX_PPDU_MORE + 0x24u) /* the frame's power and its response's, from libphy; see mac.c */
+#define TX_TXLEN(s)    (TX_PPDU(s) + TX_PPDU_MORE + 0x30u)
+#define TX_RESP(s)     (TX_PPDU(s) + TX_PPDU_MORE + 0x34u) /* the response's rate, and the antennas of hal_attenna_init */
+#define TX_DONE(s)     (TX_PPDU(s) + TX_PPDU_MORE + 0x60u) /* how the frame sent last ended, which hal_mac_get_txq_complete reads */
 
 /* The MAC's and the HAL's register words end here; devregs.h's rd and wr reach them and the baseband's alike. */
 
