@@ -1,7 +1,7 @@
 A wait that ends leaves its thread lending.
 A thread that runs again still pays for its borrower's turns.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a thread that does not wait lends
 Witness: fuzz lend-hands-turn
 

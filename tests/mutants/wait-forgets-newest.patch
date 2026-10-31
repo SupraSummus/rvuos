@@ -3,6 +3,7 @@ A signal or a switch would never reach it, and the ring would not close;
 a queue is a ring linked both ways.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a place's virtual time comes before the release
 Report: a waiting or ready thread is on no queue
 Report: queue is not linked back
 Witness: fuzz actor-handoff

@@ -426,6 +426,21 @@ what is left:
 
 ## Verification
 
+- A walk another thread keeps pace with never ends, which breaks "What a holder gave, it takes back"; open decision 43.
+  With a remedy, `host/history.c` can hold the promise's safe half,
+  that no call puts a node back where a stopped walk goes, and `revoke_outpaced` leaves as the model follows.
+- No check holds a promise over a run, nor one across two runs; see "What no check reaches".
+  A search of `model-check` for a state it comes back to with a call still to make would find walks like decision 43's
+  from every state a trace passes, not only from one written down, but needs a depth of six where the default is two.
+  The promises to state next, each as a theorem of the model where its state says enough, else as a check of the host build:
+  - who can take a capability away: a holder of one above it, a thread that writes its table, or the destroy of its table's pool;
+  - memory that one process alone reaches stays so until that process, or a holder of a capability above its own, hands it on;
+  - what one process sees, refusals and descriptions among them, is the same whatever a process sharing no capability with it does,
+    which the host build can test as two runs of one input, with and without the other's records;
+  - a component destroyed and built again from the same image and capabilities starts as the first did,
+    tested the same way, with and without the life of the one before;
+  - what a process can ever come to hold, given the tables it shares with others;
+  - the share of its core a thread with units has over any window, whatever the others do.
 - The host shim states what `pmp_init` finds rather than running it,
   so its search for hardwired entries, past the budget too, runs only on an RP2350, and no mutant can stand in it.
   Running `pmp.c` over the shim's CSRs, which already model the grain and RP2350's three, would let `fuzz-rp2350` hold it;

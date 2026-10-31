@@ -46,7 +46,9 @@ so the kernel needs no record of where it stopped, no second stack and no worker
 and the time lands in the slice of the thread that made the call.
 A pool's destroy goes on from where it stopped whichever revoke takes the next step,
 below the Untyped that began it or below one above that.
-A walk asks only after a step, so every attempt takes something away and the restarts end.
+A walk asks only after a step, so every attempt takes something away,
+and the restarts end unless something is made below between them as fast as they take it;
+see "What a holder gave, it takes back" and open decision 43.
 Whether `intr_pending` is right changes when a walk stops, never what it does.
 A restart is a new call:
 it checks everything again, and revokes what was derived in between too.

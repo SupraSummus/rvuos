@@ -5,7 +5,7 @@ Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and
 ## Properties
 
 These invariants must hold in every state a process can reach,
-or, where they say so, across every call.
+or, where they say so, across every call or over a run.
 `kernel/selfcheck.c` is the executable form of those about one state;
 keep the two in step.
 
@@ -263,8 +263,8 @@ so this is what keeps a thread from making a call it cannot return from.
 
 **A dying pool only gives back.**
 No call builds an object in a pool whose destroy has begun,
-so every step of the destroy takes something away and the destroy ends,
-whatever other threads do between its steps.
+so every step of the destroy takes something away.
+That the destroy ends does not follow, and does not hold; see "What a holder gave, it takes back".
 
 **A step charges.**
 Under tracing, where the clock is the record's,
@@ -341,6 +341,24 @@ It does not know what memory held before a call,
 so an object handed out unzeroed shows only by what it holds:
 the host's RAM starts out holding a pattern and keeps the objects of the input before,
 and a new table's stale slots are capabilities its maker held nothing to cover.
+
+**What a holder gave, it takes back.**
+A walk whose thread makes it again whenever it stops ends, whatever other threads do between its steps:
+a revoke, a pool's destroy, a delete below a root, and the revoke that begins a bind.
+This is what a parent needs: what it lent comes back to it.
+It is a promise over a run, which no check of a state or a call holds,
+and steps that each keep the forest need not end.
+It does not hold.
+A walk keeps its progress in the tree alone,
+and a thread with two capabilities where the walk goes puts back with one call what each step took:
+a copy of the one left into the slot the step emptied,
+or, below a root, a delete of the child made a root and then such a copy.
+The seeds `revoke-outpaced`, `destroy-outpaced`, `delete-root-outpaced` and `destroy-root-outpaced` replay it,
+`OP_TEST_PREEMPT` stopping the walk after every step, and `revoke_outpaced` shows it in the model.
+On two cores a thread waiting for the kernel's lock stops a walk after one step too,
+so a thread there that calls without a pause may keep pace; no run has shown it.
+On one core the other thread runs between two steps only on time of its own.
+Open decision 43 weighs the remedies.
 
 **Exit to user mode.**
 Every `mret` enters user mode,
@@ -749,6 +767,17 @@ and can be fed to the board once something loads them there;
 the replay driver's second stack is QEMU's address, see `rvuos/replay.h`,
 so it is not built for the board yet.
 
+**What no check reaches.**
+Every check above holds what it sees to a statement about one state or one call.
+So none holds a promise over a run, that something ends or happens in time whatever other threads do,
+since a run that never ends passes each of its steps;
+nor one across two runs, that what a process sees is the same whatever a process it shares nothing with does.
+"What a holder gave, it takes back" is of the first kind, and broken.
+"What a request promises" and "How much work a thread gets", in "Scheduling", are of it too,
+and only `make lab` measures them, in its own scenarios.
+None of the second kind is stated yet.
+`.claude/skills/run-promises/SKILL.md` says how such promises are found.
+
 ## The model
 
 `model/` holds a model of the derivation tree in Lean 4,
@@ -844,3 +873,9 @@ What is proved is proved of the model:
   So what a capability gave out stays below it, with no more rights, memory or bits, until a revoke of it takes it.
   `step_checked` puts it with `step_nested`: the four invariants hold together from step to step.
   It trusts Lean's compiler as `step_nested` does.
+- `revoke_outpaced`, in `model/Rvuos/Outpaced.lean`, is a break, not a proof:
+  from the forest `revoke-outpaced` reaches as its revoke begins,
+  rounds of a stopped step of the revoke and a copy by another thread come back to a state they passed,
+  so every step keeps the four invariants and the revoke never ends.
+  It is shown by `native_decide`, which trusts Lean's compiler too,
+  and goes once the model follows a remedy of open decision 43.

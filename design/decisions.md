@@ -994,3 +994,29 @@ until the maintainer decides otherwise.
     - **The nRF52840's EasyDMA**, whose pointers lie in each device's own registers, which the device's holder writes,
       so the device stays trusted; to lend it the kernel would hold the device's pointers,
       which share the device's block with the rest of its registers, and so the device whole.
+
+43. **A walk another thread keeps pace with.**
+    Working default: none, so "What a holder gave, it takes back" does not hold.
+    Weighed:
+    - **Nothing made to a dying pool's objects**:
+      a copy, a derivation or a bind through a capability to a dying pool or to one of its objects refused with `KERR_STATE`,
+      as an allocation is; every object records its pool, so the check is constant.
+      It ends the destroy's revoke below the pool's node, but not its delete of a root a table of the pool holds,
+      `destroy-root-outpaced`, nor any other walk.
+    - **Two steps before a stop for another core**:
+      a thread on the other core puts back one node a call at most, so it falls behind,
+      and the wait for the lock grows by a step.
+      On one core the promise becomes one of time: a walk ends if its thread has more time than those who put back.
+    - **A slot the walk empties stays taken until it ends**:
+      the step leaves a mark in the node it clears, which only the walk may clear, once its first child is a mark.
+      A copy then needs a slot that was free as the walk began;
+      but a thread that remakes a table of its own has slots anew,
+      and a walk left half done keeps slots in other processes' tables.
+      A delete below a root frees no slot, so there the mark goes on the child it makes a root.
+    - **Nothing made from a node below a walk**:
+      a mark in each node below, which a copy and a derivation refuse,
+      set by a walk without a stack whose place between stops the tree would have to keep.
+    - **The kernel promises nothing**: a parent first stops the threads below it, or destroys their pools,
+      where it holds them; a parent that lent to a peer has no remedy.
+    Decide before a program relies on a revoke to take back what it lent to code it does not trust,
+    as the root task does of the Wi-Fi driver's frames.
