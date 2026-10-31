@@ -21,6 +21,7 @@
  * lets a child build a thread of its own from a pool, timer lines and units it gave it,
  * hears that thread's fault as the child's, and takes it all back, twice;
  * lets a child move its table to a larger one from a pool it gave it, every capability keeping its number, twice;
+ * writes and reads a frame in each block of RAM the boot gave, and keeps a notification in a pool made there;
  * then takes the rest down.
  * It ends with "libtest: ok" and halt code 0, which tests/libtest.sh checks, or with what failed and another code.
  */
@@ -38,6 +39,7 @@
 #define RUN_US      10000000u /* the test's deadline */
 #define PAUSE_US    100000u   /* between two checks */
 #define ROOM_SIZE   0x8000u   /* the server's data and its clients' */
+#define RAM_ROUND_SIZE 0x10000u /* the most of each block of RAM written and read back, then made a pool */
 
 static struct self self, after;
 static struct kernel_log klog;
@@ -860,6 +862,47 @@ static void move_round(void)
     say(&out, "libtest: a child that moves its table to one twice as large, taken down twice: ok\n");
 }
 
+/*
+ * Each block of RAM the boot gave, the free RAM and the board's further blocks, such as the ESP32-C5's PSRAM:
+ * a frame at its end, written with twice what the ESP32-C5's cache holds and read back,
+ * then the same block a pool, whose notification, an object the kernel keeps in that RAM, is signalled and waited on.
+ */
+static void ram_round(void)
+{
+    struct self_tally before = tally();
+    for (uint32_t w = 0; w < SELF_WHOLES; w++) {
+        struct block blk;
+        uint32_t size = self.whole[w].size / 2, region, note, bits;
+        size = size < RAM_ROUND_SIZE ? size : RAM_ROUND_SIZE;
+        uint32_t base = self.whole[w].base + self.whole[w].size - size;
+        must("a block at the RAM's end", mem_take_at(&self, base, size, &blk));
+        must("make it a frame", mem_make(&self, &blk, CAP_FRAME));
+        must("install it", region_install(&self, blk.made, RIGHT_R | RIGHT_W, &region));
+        volatile uint32_t *word = (volatile uint32_t *)(uintptr_t)base;
+        for (uint32_t i = 0; i < size / 4; i++) {
+            word[i] = base + 4 * i + w;
+        }
+        uint32_t wrong = 0;
+        for (uint32_t i = 0; i < size / 4; i++) {
+            wrong += word[i] != base + 4 * i + w;
+        }
+        check(wrong == 0, "a block of RAM reads back what was written");
+        must("uninstall it", region_free(&self, region));
+        must("give it back", mem_give(&self, &blk));
+        must("the same block again", mem_take_at(&self, base, size, &blk));
+        must("make it a pool", mem_make(&self, &blk, CAP_POOL));
+        must("a slot for its notification", slot_new(&self, &note));
+        must("a notification there", rv_pool_alloc(blk.made, CAP_NOTIFICATION, note, 0));
+        must("signal it", rv_signal(note, 1u << w));
+        must("wait on it", rv_wait(note, &bits));
+        check(bits == 1u << w, "a notification in a block of RAM keeps the bit signalled");
+        must("give the pool back", mem_give(&self, &blk));
+        must("free the notification's slot", slot_free(&self, note));
+        say(&out, "libtest: RAM at %x, %u bytes written and read, then a pool: ok\n", base, size);
+    }
+    check(same(tally(), before), "the blocks of RAM gave back what they were given");
+}
+
 int main(void)
 {
     uint32_t base, size, region, deadline;
@@ -948,6 +991,7 @@ int main(void)
     bulk_round();
     own_round();
     move_round();
+    ram_round();
     check(same(tally(), start), "everything handed out came back");
     say(&out, "libtest: down, %u bytes free and %u slots unused\n", mem_unused(&self), slots_unused(&self));
     say(&out, "libtest: ok\n");

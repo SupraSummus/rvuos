@@ -372,7 +372,8 @@ Interrupt lines:
 The root task is granted a frame over each of the devices in the next table, from `BOOT_CAP_DEVICES` up.
 After them, in slot 31, it is granted `BOOT_CAP_MORE_RAM`:
 an Untyped over the further block of RAM, 128 KiB from `0x40820000`.
-So `BOOT_CAP_COUNT` is 32 here, and the root task's table has 78 slots:
+So `BOOT_CAP_COUNT` is 32 here, and the root task's table has 78 slots.
+A kernel built with `PSRAM=1` adds one more block, see "PSRAM" below.
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
@@ -395,6 +396,32 @@ The radio needs a few of their bits, so the kernel sets them at boot:
 - the analog I2C buses that the PHY's calibration uses, the 5 GHz ones among them;
 - the power detector's capacitance in LP_AON.
 The GDMA is not listed, because it belongs to the kernel.
+
+**PSRAM.**
+Some ESP32-C5 chips have PSRAM in their package.
+The ESP32-C5HR8 on Seeed's XIAO ESP32-C5 has 8 MiB.
+A kernel built with `PSRAM=1` grants it to the root task:
+
+- The build goes to `build/esp32c5-psram/`.
+- The kernel starts the PSRAM at boot, at 40 MHz.
+  If no PSRAM answers, the kernel stops with a panic.
+- The PSRAM is read and written through the cache, from `0x43000000`.
+- In slot 32, after `BOOT_CAP_MORE_RAM`, the root task is granted `BOOT_CAP_PSRAM`:
+  an Untyped with all rights over the 8 MiB.
+  So `BOOT_CAP_COUNT` is 33 with `PSRAM=1`.
+
+A program uses the PSRAM as any other RAM.
+It can make frames of it, for data and for code, and pools.
+Atomic instructions work on it.
+But it is slower than SRAM:
+
+- A read that misses the cache costs about 360 cycles at the 160 MHz clock.
+  A read of SRAM costs about 3.
+- A store that misses the cache first reads the line, and costs about 680 cycles.
+- A pool there makes the kernel slower too, because the kernel's objects then lie in the PSRAM.
+- The GDMA cannot read it, so `OP_DMA_END` refuses a frame there as a source.
+
+The cache holds 32 KiB, and the flash shares it.
 
 **DMA.**
 `BOOT_CAP_DMA` names the GDMA's three transmit channels, 0 to 2 (section 5.14).
@@ -839,6 +866,11 @@ These builds add `-nodma` and `-noroutes` to the directory name.
 The kernel then leaves their code out:
 about 2 KiB for DMA on a board with a controller, and 1.4 KiB for routes on the nRF52840.
 A kernel leaves this code out by itself where the board has no controller or no router.
+
+`make BOARD=esp32c5 PSRAM=1` builds a kernel that grants the PSRAM in the chip's package, as section 3 says.
+The build adds `-psram` to the directory name.
+Only an ESP32-C5 with PSRAM boots it, such as the ESP32-C5HR8 on Seeed's XIAO ESP32-C5.
+No other board takes `PSRAM`.
 
 On the ESP32-C6, connected over USB:
 

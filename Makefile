@@ -84,7 +84,18 @@ ifneq ($(filter-out 0 1,$(DMA) $(ROUTES)),)
 $(error DMA=$(DMA) ROUTES=$(ROUTES); each is 1, the board's channels lent, or 0)
 endif
 LEND_VARIANT := $(if $(filter 0,$(DMA)),-nodma)$(if $(filter 0,$(ROUTES)),-noroutes)
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(WIFI_BRIDGE_VARIANT)$(LEND_VARIANT)
+# The PSRAM in an ESP32-C5HR8's package, as on Seeed's XIAO ESP32-C5, which the ESP32-C5's Waveshare board lacks:
+# PSRAM=1 builds a kernel that brings it up and grants it as a further block of RAM, and programs that know its slot,
+# in a directory of its own, as a budget does; see kernel/board/esp32c5/mspi.c.
+PSRAM ?= 0
+ifneq ($(filter-out 0 1,$(PSRAM)),)
+$(error PSRAM=$(PSRAM); it is 1, the chip's PSRAM granted, or 0)
+endif
+ifeq ($(PSRAM)$(filter esp32c5,$(BOARD)),1)
+$(error BOARD=$(BOARD) has no PSRAM=1; only esp32c5 takes it)
+endif
+PSRAM_VARIANT := $(if $(filter 1,$(PSRAM)),-psram)
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(WIFI_BRIDGE_VARIANT)$(LEND_VARIANT)$(PSRAM_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -115,7 +126,7 @@ CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-com
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
              -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DSELFCHECK=$(SELFCHECK) \
              $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(WIFI_BRIDGE)),-DWIFI_BRIDGE=1) \
-             $(if $(filter 0,$(DMA)),-DDMA_OFF) $(if $(filter 0,$(ROUTES)),-DROUTE_OFF)
+             $(if $(filter 0,$(DMA)),-DDMA_OFF) $(if $(filter 0,$(ROUTES)),-DROUTE_OFF) $(if $(filter 1,$(PSRAM)),-DPSRAM)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES) $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 

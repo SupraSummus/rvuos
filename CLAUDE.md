@@ -69,6 +69,7 @@ and a change to anything the demo or the escape suite exercises runs the board's
 |---|---|---|---|
 | ESP32-C6 | `kernel/board/esp32c6/`, `user/board/esp32c6/`, `kernel/board/esp32/`, `user/board/esp32/` | `make BOARD=esp32c6 test escape` | the board's install rule |
 | ESP32-C5 | `kernel/board/esp32c5/`, `user/board/esp32c5/`, the same `esp32/`, `kernel/arch/riscv/clic.h` | `make BOARD=esp32c5 test escape` | the CLIC and the TEE controllers |
+| Seeed XIAO ESP32-C5 | `kernel/board/esp32c5/mspi.c`, the further blocks of RAM | `make BOARD=esp32c5 PSRAM=1 test escape lib-test` | the PSRAM |
 | RP2350 in BOOTSEL mode | `kernel/board/rp2350/`, `user/board/rp2350/` | `make BOARD=rp2350 test escape` | its PMP quirks |
 | RP2350 in BOOTSEL mode | the same, `kernel/arch/arm/` | `make BOARD=rp2350 ARCH=arm test escape` | PMSAv8 and the Cortex-M33 on silicon |
 | RP2350 in BOOTSEL mode | the same, how the cores lock, start or interrupt each other | both again with `CORES=2` | two cores on silicon |

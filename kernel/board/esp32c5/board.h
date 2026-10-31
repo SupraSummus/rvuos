@@ -24,9 +24,25 @@
 #define BOOT_POOL_BASE U32(0x40818000)
 #define FREE_RAM_BASE  U32(0x40840000)
 #define FREE_RAM_SIZE  U32(0x00020000)
-/* The further block of RAM, which the boot grants as an Untyped from BOOT_CAP_RAM_BLOCKS up; see boot.c. */
+/*
+ * The further blocks of RAM, which the boot grants as Untypeds from BOOT_CAP_RAM_BLOCKS up; see boot.c.
+ * In a kernel built with PSRAM=1, for an ESP32-C5HR8 such as Seeed's XIAO ESP32-C5,
+ * the PSRAM in the chip's package is the second, 8 MiB, which the MMU shows through the cache from PSRAM_BASE,
+ * past the flash's image; see mspi.c.
+ * It lies outside RAM_BASE's RAM, so the board names it as RAM of its own, EXT_RAM_BASE and EXT_RAM_SIZE.
+ * A miss of the cache there costs hundreds of cycles, and the GDMA's window leaves it out.
+ */
+#ifdef PSRAM
+#define PSRAM_BASE      U32(0x43000000)
+#define PSRAM_SIZE      U32(0x00800000)
+#define EXT_RAM_BASE    PSRAM_BASE
+#define EXT_RAM_SIZE    PSRAM_SIZE
+#define BOOT_RAM_BLOCKS 2
+#define RAM_BLOCK_LIST  { U32(0x40820000), U32(0x00020000), RIGHT_ALL }, { PSRAM_BASE, PSRAM_SIZE, RIGHT_ALL },
+#else
 #define BOOT_RAM_BLOCKS 1
-#define RAM_BLOCK_LIST { U32(0x40820000), U32(0x00020000), RIGHT_ALL },
+#define RAM_BLOCK_LIST  { U32(0x40820000), U32(0x00020000), RIGHT_ALL },
+#endif
 
 /*
  * The flash, 4 MiB in the ESP32-C5HF4's package, whose first MiB the MMU shows page for page from FLASH_IMAGE_BASE.

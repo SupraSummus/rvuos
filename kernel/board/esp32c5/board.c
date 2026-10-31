@@ -45,6 +45,7 @@
  * whenever it comes; measured on the chip, resets in the middle of the cache's misses boot cleanly with it clear, and hang with it set.
  *
  * The MMU's only valid entries are the image's 64 KiB pages and the window's, see board.h, each run in order, which the kernel sets,
+ * and in a kernel built with PSRAM=1 the PSRAM's, which mspi.c brings up later,
  * with the cache emptied of what the pages held before, then lets the cache's buses through.
  *
  * The core has user-mode traps, the N extension, and the CLIC's user-mode CSRs,
@@ -152,6 +153,7 @@
 #define MMU_ENTRIES          512u
 #define MMU_PAGE             0x10000u
 #define MMU_VALID            (1u << 10)
+#define MMU_PSRAM            (1u << 9) /* the page is the PSRAM's, not the flash's */
 #define CACHE_L1_CACHE_CTRL  (0x600C8000u + 0x04u)
 #define CACHE_SHUT_BUSES     0x3u /* IBUS and DBUS */
 #define CACHE_SYNC_CTRL      (0x600C8000u + 0x94u)
@@ -170,8 +172,13 @@ _Static_assert(FLASH_WINDOW_BASE >= MMU_BASE && FLASH_IMAGE_BASE >= FLASH_WINDOW
                    FLASH_IMAGE_BASE + FLASH_IMAGE_SIZE <= MMU_BASE + MMU_PAGE * MMU_ENTRIES &&
                    FLASH_IMAGE_SIZE <= FLASH_WINDOW_FLASH,
                "the window and the image lie apart in the MMU's space and in flash");
+#ifdef PSRAM
+_Static_assert(PSRAM_BASE % MMU_PAGE == 0 && PSRAM_SIZE % MMU_PAGE == 0 && PSRAM_BASE >= FLASH_IMAGE_BASE + FLASH_IMAGE_SIZE &&
+                   PSRAM_BASE + PSRAM_SIZE <= MMU_BASE + MMU_PAGE * MMU_ENTRIES,
+               "the PSRAM is whole pages, past the image in the MMU's space");
+#endif
 
-/* The flash page entry i of the MMU shows, or 0 for none. */
+/* The page of flash or PSRAM entry i of the MMU shows, or 0 for none. */
 static uint32_t mmu_item(uint32_t i)
 {
     uint32_t at = MMU_BASE + i * MMU_PAGE;
@@ -181,6 +188,11 @@ static uint32_t mmu_item(uint32_t i)
     if (at - FLASH_IMAGE_BASE < FLASH_IMAGE_SIZE) {
         return MMU_VALID | (at - FLASH_IMAGE_BASE) / MMU_PAGE;
     }
+#ifdef PSRAM
+    if (at - PSRAM_BASE < PSRAM_SIZE) {
+        return MMU_VALID | MMU_PSRAM | (at - PSRAM_BASE) / MMU_PAGE;
+    }
+#endif
     return 0;
 }
 

@@ -23,9 +23,19 @@
 #define BOOT_CAP_MODEM  (BOOT_CAP_DEVICES + 7) /* the modem, 64 KiB, with its MACs, which are bus masters */
 #define BOOT_CAP_FLASH  (BOOT_CAP_DEVICES + 8) /* the window onto flash, read and execute, 1 MiB */
 
-/* The further block of RAM the boot grants as an Untyped from BOOT_CAP_RAM_BLOCKS up, beside the free RAM. */
+/*
+ * The further blocks of RAM the boot grants as Untypeds from BOOT_CAP_RAM_BLOCKS up, beside the free RAM;
+ * built with PSRAM=1, for an ESP32-C5HR8, the PSRAM in the chip's package too, read through the cache, see the kernel's board.h.
+ */
+#ifdef PSRAM
+#define BOOT_RAM_BLOCKS 2
+#else
 #define BOOT_RAM_BLOCKS 1
+#endif
 #define BOOT_CAP_MORE_RAM (BOOT_CAP_RAM_BLOCKS + 0) /* 128 KiB from 0x40820000, right below the free RAM */
+#ifdef PSRAM
+#define BOOT_CAP_PSRAM    (BOOT_CAP_RAM_BLOCKS + 1) /* the PSRAM, 8 MiB from 0x43000000 */
+#endif
 
 /*
  * BOOT_CAP_DMA's channels: the GDMA's transmit channels, each reading memory, its source, into a device, its sink,

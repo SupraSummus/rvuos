@@ -942,7 +942,8 @@ until the maintainer decides otherwise.
     could reach a program only as one block of it, the largest:
     on the ESP32-C6, once the root task's code moved to flash, the free RAM's half and a quarter below it.
     The board says which blocks, as it says which devices, and the boot checks that each lies in RAM
-    apart from the kernel, its log, the root task's memory, the free RAM and the blocks before it.
+    apart from the kernel, its log, the root task's memory, the free RAM and the blocks before it;
+    RAM the board has outside its SRAM counts too, as the ESP32-C5's PSRAM does in a kernel built with `PSRAM=1`.
     QEMU lists none, so its table, the seeds and the corpus stay as they were.
     A block is a root of its own, as the free RAM is, so no operation joins it to another:
     `lib/mem.c` joins a block's halves back into the block, each block on its own.

@@ -152,7 +152,9 @@ A board lists, in `RAM_BLOCK_LIST`, the blocks of RAM it sets aside for the root
 and the boot grants each as an Untyped with all rights, from `BOOT_CAP_RAM_BLOCKS` up in the list's order,
 once it has checked that each lies in RAM apart from the kernel, its log, the root task's memory, the free RAM
 and the blocks before it; a board whose blocks do not lie so does not boot.
-The ESP32-C6 lists the quarter of its RAM below the free RAM, 128 KiB from `0x40820000`;
+RAM is the board's RAM from `RAM_BASE`, or RAM it has outside that, which it names `EXT_RAM_BASE` and `EXT_RAM_SIZE`.
+The ESP32-C6 and the ESP32-C5 list the block of RAM below the free RAM, 128 KiB from `0x40820000`,
+and the ESP32-C5 built with `PSRAM=1` its PSRAM after it;
 no other board lists any, decision 40.
 
 **Routers.**
@@ -273,6 +275,9 @@ the modem's power among them, which covers the MAC's power and timer block, MODE
 Its system bus resets at power-on alone while PCR's `RESET_EVENT_BYPASS` is set, as it powers on,
 so a reset in the middle of a cache's read of flash leaves the chip hung until its enable pin; the kernel clears the bit first thing.
 The kernel reads the flash quad I/O at 80 MHz, where the ROM left dual I/O at 48, see `kernel/board/esp32c5/mspi.c`.
+A kernel built with `PSRAM=1`, for an ESP32-C5HR8 such as Seeed's XIAO ESP32-C5, brings up its 8 MiB of PSRAM
+and grants it as a further block of RAM, through the cache from `0x43000000`.
+Pools, and so kernel objects, may lie there, at hundreds of cycles a miss; the GDMA's window leaves it out.
 Of the peripherals it lists SPI2, which drives the board's LCD, and not the GDMA, so SPI2 is no bus master to the program that holds it;
 SPI2's clocks are in PCR, which stays the kernel's, so the kernel sets them, 80 MHz for its master clock, and resets the controller at boot.
 The GDMA is the kernel's, which lends its transmit channels, see "DMA controllers" above,

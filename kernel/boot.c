@@ -16,10 +16,15 @@ struct granted_range boot_granted[GRANTED_RANGES];
 /*
  * Whether block g, the boot's grant at, lies in RAM and apart from the kernel, its log, the root task's memory,
  * the free RAM and every grant before it, as a block of RAM no other Untyped covers must.
+ * RAM is RAM_BASE's, or the RAM a board has outside it, EXT_RAM_BASE's, such as the ESP32-C5's PSRAM.
  */
 static bool ram_block_apart(const struct granted_range *g, unsigned at)
 {
-    if (g->size == 0 || g->base - RAM_BASE >= RAM_SIZE || g->size > RAM_SIZE - (g->base - RAM_BASE) ||
+    bool in_ram = g->base - RAM_BASE < RAM_SIZE && g->size <= RAM_SIZE - (g->base - RAM_BASE);
+#ifdef EXT_RAM_BASE
+    in_ram = in_ram || (g->base - EXT_RAM_BASE < EXT_RAM_SIZE && g->size <= EXT_RAM_SIZE - (g->base - EXT_RAM_BASE));
+#endif
+    if (g->size == 0 || !in_ram ||
         ranges_overlap(g->base, g->size, RAM_BASE, KLOG_BASE + KLOG_REGION_SIZE - RAM_BASE)) {
         return false;
     }

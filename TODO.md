@@ -333,7 +333,9 @@ what is left:
   as measured on the chip; PMP's faults are exact. A fault the kernel reports may name the wrong instruction.
 - Whether a misaligned access is checked by halves, as the ESP32-C6's erratum DIG-694 has it:
   `PMP_SPLIT_STORE_AS_READ` stays set until a test shows either; the escape suite passes with it.
-- `make BOARD=esp32c5 bench` and `lib-test` were not run; the bench needs records of its own.
+- `make BOARD=esp32c5 bench` needs records of its own.
+- The PSRAM of a kernel built with `PSRAM=1` runs at 40 MHz, untuned.
+  ESP-IDF tunes the input's timing for 80 MHz, which on a XIAO read a miss of the cache in 207 cycles instead of 363.
 - The flash is read at 80 MHz with no tuning of the input's timing, which ESP-IDF does above 40 MHz;
   reads were checked right on a Seeed XIAO's Puya flash alone, not on the Waveshare board's flash in the package.
 - The halt's dump over the USB Serial/JTAG, `esp32/halt.c`, loses its end for some lengths:
