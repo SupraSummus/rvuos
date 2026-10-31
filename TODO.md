@@ -334,6 +334,11 @@ what is left:
 - Whether a misaligned access is checked by halves, as the ESP32-C6's erratum DIG-694 has it:
   `PMP_SPLIT_STORE_AS_READ` stays set until a test shows either; the escape suite passes with it.
 - `make BOARD=esp32c5 bench` and `lib-test` were not run; the bench needs records of its own.
+- The flash is read at 80 MHz with no tuning of the input's timing, which ESP-IDF does above 40 MHz;
+  reads were checked right on a Seeed XIAO's Puya flash alone, not on the Waveshare board's flash in the package.
+- The halt's dump over the USB Serial/JTAG, `esp32/halt.c`, loses its end for some lengths:
+  with the line `rvuos: flash quad I/O at 80 MHz` added to the boot's log, `escape-store-console` on a XIAO
+  got the dump's first 384 bytes alone, every time; lines longer by 128 bytes failed too, Linux's cdc-acm read size.
 - The kernel built with `SELFCHECK=1` no longer fits below its log, 60 KiB, here or on the ESP32-C6:
   the DMA's checks and the GDMA's driver took the last of it.
   The self-check reads the GDMA back, so `make dma-test` on such a kernel would hold the channels to it on silicon.

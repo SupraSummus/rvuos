@@ -17,6 +17,7 @@
  * and on this revision a change from PLL_F160M to PLL_F240M can stop the root clock, IDF-11064,
  * which 160 MHz never asks for.
  * The boot's log says the clock set and the one found, both measured.
+ * The MSPI's clock comes from the SPLL too, so mspi_init sets it once the SPLL is set; see mspi.c.
  */
 
 #include <stdint.h>
@@ -24,6 +25,7 @@
 #include "clint.h"
 #include "kernel.h"
 #include "layout.h"
+#include "mspi.h"
 #include "timer.h"
 
 #define CLINT_BASE     0x20000000u
@@ -177,6 +179,7 @@ void timer_init(void)
     uint32_t found = ms_measure();
     sspll_set();
     cpu_clock_set();
+    mspi_init();
     timer_start(ms_measure() * 1000u);
     kputs("rvuos: cpu clock ");
     kput_hex(timer_counter_hz());

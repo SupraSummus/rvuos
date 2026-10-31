@@ -272,6 +272,7 @@ The HP controller's words run past the last its register header names to those E
 the modem's power among them, which covers the MAC's power and timer block, MODEM_LPCON and the analog I2C master.
 Its system bus resets at power-on alone while PCR's `RESET_EVENT_BYPASS` is set, as it powers on,
 so a reset in the middle of a cache's read of flash leaves the chip hung until its enable pin; the kernel clears the bit first thing.
+The kernel reads the flash quad I/O at 80 MHz, where the ROM left dual I/O at 48, see `kernel/board/esp32c5/mspi.c`.
 Of the peripherals it lists SPI2, which drives the board's LCD, and not the GDMA, so SPI2 is no bus master to the program that holds it;
 SPI2's clocks are in PCR, which stays the kernel's, so the kernel sets them, 80 MHz for its master clock, and resets the controller at boot.
 The GDMA is the kernel's, which lends its transmit channels, see "DMA controllers" above,
