@@ -1,0 +1,46 @@
+# A pool's destroy another thread keeps pace with where no copy reaches the pool:
+# the root makes a pool and a table in it, derives two frames into the second thread's table below a root it then moves into that table,
+# and revokes below the pool's memory; once the capabilities to the pool are gone, the destroy deletes the root a step at a time,
+# and between each two steps the second deletes the child that became a root and copies the one still below into its slot;
+# so refusing copies of capabilities to a dying pool's objects would not end it; see DESIGN.md, "What a holder gave, it takes back".
+actor 1 OP_UNTYPED_RETYPE slot REPLAY_CAP_RAM a1 CAP_POOL a2 REPLAY_CAP_FREE+13
+actor 1 OP_POOL_ALLOC slot REPLAY_CAP_FREE+13 a1 CAP_CAPTABLE a2 REPLAY_CAP_FREE+14 a3 4
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE a2 BOOT_CAP_UART a3 RIGHT_ALL
+actor 1 OP_CAP_DERIVE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 1 OP_CAP_DERIVE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 1 OP_CAP_MOVE slot REPLAY_CAP_FREE+14 a1 0 a2 REPLAY_CAP_FREE
+actor 1 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 1 OP_CAP_REVOKE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_RAM
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE+1 a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE+1 a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE+1 a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE+1 a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_POOL_INFO slot SLOT_IN(1, REPLAY_CAP_FREE+13) a1 0 a3 0

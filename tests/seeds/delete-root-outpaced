@@ -1,0 +1,33 @@
+# A delete below a root another thread keeps pace with: the root copies the UART's frame, a root, beside it,
+# derives two frames below the copy into the second thread's table, and deletes the copy, which stops after each child it makes a root;
+# between each two steps the second deletes the child that became a root and copies the one still below into its slot,
+# so the copy keeps a child after every round; see DESIGN.md, "What a holder gave, it takes back".
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE a2 BOOT_CAP_UART a3 RIGHT_ALL
+actor 1 OP_CAP_DERIVE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 1 OP_CAP_DERIVE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 1 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 1 OP_CAP_DELETE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE+1 a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE+1 a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_FREE a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_CAP_DELETE slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE
+actor 2 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_FREE+1 a3 RIGHT_ALL
+actor 2 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
