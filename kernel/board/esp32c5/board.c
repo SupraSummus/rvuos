@@ -38,6 +38,12 @@
  * The random number generator, which board.h lists read only, comes from the ROM stirring in two timers
  * but not sampling its ring oscillator, which the kernel turns on, as ESP-IDF does at its start.
  *
+ * The system bus, its arbiter and router, resets at power-on alone while PCR's RESET_EVENT_BYPASS is set, as it is at power-on,
+ * so a reset in the middle of a cache's read of flash, a watchdog's or the USB Serial/JTAG's, leaves it stopped:
+ * every boot after hangs in the ROM's first read of flash, until the chip's enable pin or its power resets it.
+ * The kernel clears the bit first thing, as ESP-IDF's bootloader does, so the next reset takes the bus with it,
+ * whenever it comes; measured on the chip, resets in the middle of the cache's misses boot cleanly with it clear, and hang with it set.
+ *
  * The MMU's only valid entries are the image's 64 KiB pages and the window's, see board.h, each run in order, which the kernel sets,
  * with the cache emptied of what the pages held before, then lets the cache's buses through.
  *
@@ -89,6 +95,9 @@
 #define LP_TEE_PERI_LAST     0x600B344Cu /* LP_APM's */
 #define TEE_EVERY_MODE       0xFFu
 
+/* Which resets reach the system bus: with this bit set, a power-on's alone. */
+#define PCR_RESET_EVENT_BYPASS 0x60096174u
+#define PCR_BYPASS_SYSTEM_BUS  (1u << 1)
 /* SPI2's clocks and reset, in PCR. */
 #define PCR_SPI2_CONF        0x600960C4u
 #define PCR_SPI2_CLK_EN      (1u << 0) /* its registers' clock */
@@ -192,6 +201,7 @@ static void flash_map(void)
 
 void board_init(void)
 {
+    REG(PCR_RESET_EVENT_BYPASS) &= ~PCR_BYPASS_SYSTEM_BUS;
     csr_write(mideleg, 0);
 
     REG(HP_APM_FUNC_CTRL) = 0;

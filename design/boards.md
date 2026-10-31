@@ -270,6 +270,8 @@ TEE controllers give each peripheral a read and a write bit per security mode, r
 so user mode reads every peripheral as zero; the kernel turns the units off and grants every TEE bit to every mode.
 The HP controller's words run past the last its register header names to those ESP-IDF's `soc/apm_defs.h` numbers,
 the modem's power among them, which covers the MAC's power and timer block, MODEM_LPCON and the analog I2C master.
+Its system bus resets at power-on alone while PCR's `RESET_EVENT_BYPASS` is set, as it powers on,
+so a reset in the middle of a cache's read of flash leaves the chip hung until its enable pin; the kernel clears the bit first thing.
 Of the peripherals it lists SPI2, which drives the board's LCD, and not the GDMA, so SPI2 is no bus master to the program that holds it;
 SPI2's clocks are in PCR, which stays the kernel's, so the kernel sets them, 80 MHz for its master clock, and resets the controller at boot.
 The GDMA is the kernel's, which lends its transmit channels, see "DMA controllers" above,
